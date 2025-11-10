@@ -175,55 +175,35 @@
 
 ## 5. システム構成
 
-### 5.1 アーキテクチャ概要
+システム構成の詳細は **[docs/architecture.md](docs/architecture.md)** を参照してください。
+
+### 5.1 アーキテクチャ概要（Phase 1: MVP）
+
 ```
 [フロントエンド (Next.js)]
+  ├─ 左パネル: 要件定義書プレビュー
+  └─ 右パネル: AIチャット
         ↓ HTTP/REST API
 [バックエンド (FastAPI)]
+  ├─ ブレークダウンサービス
+  ├─ レビューサービス
+  └─ セッション管理
         ↓ HTTP API
-[vLLM Server (Qwen3-Coder)]
+[LLMプロバイダー]
+  ├─ OpenRouter (テスト/開発)
+  └─ vLLM (本番環境)
 ```
 
-### 5.2 ディレクトリ構成（案）
-```
-requirement-support/
-├── backend/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── api/
-│   │   │   ├── breakdown.py
-│   │   │   └── review.py
-│   │   ├── services/
-│   │   │   ├── llm_service.py
-│   │   │   ├── breakdown_service.py
-│   │   │   └── review_service.py
-│   │   ├── models/
-│   │   │   └── schemas.py
-│   │   └── utils/
-│   │       └── markdown_parser.py
-│   ├── requirements.txt
-│   └── README.md
-├── frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── page.tsx
-│   │   │   ├── breakdown/
-│   │   │   │   └── page.tsx
-│   │   │   └── review/
-│   │   │       └── page.tsx
-│   │   ├── components/
-│   │   │   ├── MarkdownEditor.tsx
-│   │   │   ├── QuestionList.tsx
-│   │   │   └── ReviewReport.tsx
-│   │   └── lib/
-│   │       └── api.ts
-│   ├── package.json
-│   └── README.md
-├── data/
-│   ├── requirements/
-│   └── sessions/
-└── README.md
-```
+### 5.2 Phase 2: 拡張アーキテクチャ
+
+Phase 2では以下の拡張を予定：
+
+- **GraphRAG + Neo4j**: 知識グラフベースのレビュー
+- **Git連携**: 自動バージョン管理
+
+詳細は以下を参照：
+- [docs/architecture.md](docs/architecture.md) - 全体アーキテクチャ
+- [docs/graphrag-architecture.md](docs/graphrag-architecture.md) - GraphRAG実装詳細
 
 ## 6. API仕様（概要）
 
@@ -460,543 +440,69 @@ requirement-support/
 
 ## 13. GraphRAG + Neo4j統合計画（Phase 2拡張）
 
-### 13.1 目的と背景
+### 13.1 概要
 
-#### 13.1.1 課題
-現在のレビュー機能は、LLMによるテキストベースの分析に依存しており、以下の課題があります：
-- 要件間の関係性を体系的に把握できない
-- 依存関係の漏れを論理的に検証できない
-- 矛盾の検出が表層的になりがち
-- 影響範囲の分析が不十分
+現在のレビュー機能をGraphRAG（Graph Retrieval-Augmented Generation）とNeo4jで強化し、要件間の関係性を可視化して論理的なレビューを実現します。
 
-#### 13.1.2 解決策
-GraphRAG（Graph Retrieval-Augmented Generation）とNeo4jを活用し、要件定義書から知識グラフを構築することで、論理的かつ構造的なレビューを実現します。
-
-#### 13.1.3 期待効果
+#### 主要機能
+- 要件定義書から知識グラフを自動構築
 - 要件間の依存関係を可視化
-- 矛盾や循環依存を自動検出
-- 影響範囲分析の精度向上
-- 漏れの論理的な検証
+- 循環依存や孤立要件の自動検出
+- グラフアルゴリズムによる影響範囲分析
+- インタラクティブなグラフUI
+
+#### 期待効果
+- 矛盾検出精度の向上
+- 依存関係の漏れを論理的に検証
+- 影響範囲の可視化
 - トレーサビリティの確保
 
-### 13.2 アーキテクチャ設計
+### 13.2 技術要素
 
-#### 13.2.1 システム構成
-```
-[フロントエンド (Next.js)]
-        ↓ HTTP/REST API
-[バックエンド (FastAPI)]
-        ↓                ↓
-[vLLM/OpenRouter]    [Neo4j Database]
-        ↓                ↓
-  テキスト生成      知識グラフ管理
-        ↓                ↓
-        └────→ GraphRAG ←────┘
-```
+- **Neo4j 5.15+**: グラフデータベース
+- **llama-index**: GraphRAG実装フレームワーク
+- **Cypher**: グラフクエリ言語
+- **vis-network / cytoscape.js**: グラフ可視化
 
-#### 13.2.2 データフロー
-1. **グラフ構築フェーズ**
-   - 要件定義書を入力
-   - LLMで要素を抽出（機能、データ、制約、ユーザー、etc.）
-   - Neo4jにノードとリレーションシップを作成
+### 13.3 詳細設計
 
-2. **分析フェーズ**
-   - グラフクエリで関係性を分析
-   - Cypherクエリで矛盾や漏れを検出
-   - グラフアルゴリズムで影響範囲を計算
+詳細なアーキテクチャ設計、実装手順、API仕様は以下を参照：
+- **[docs/graphrag-architecture.md](docs/graphrag-architecture.md)** - GraphRAG実装ガイド
+- **[docs/architecture.md](docs/architecture.md)** - 全体アーキテクチャ
 
-3. **レビューフェーズ**
-   - 分析結果をコンテキストとしてLLMに渡す
-   - LLMが自然言語でレビューレポートを生成
-
-### 13.3 グラフモデル設計
-
-#### 13.3.1 ノードタイプ
-- **Requirement**: 要件項目
-  - プロパティ: id, title, description, type, priority, status
-- **Function**: 機能
-  - プロパティ: id, name, description, category
-- **Data**: データエンティティ
-  - プロパティ: id, name, type, attributes
-- **User**: ユーザー/アクター
-  - プロパティ: id, name, role, description
-- **Constraint**: 制約条件
-  - プロパティ: id, description, type
-- **NonFunctional**: 非機能要件
-  - プロパティ: id, category, description, metric, target
-
-#### 13.3.2 リレーションシップタイプ
-- **DEPENDS_ON**: 依存関係
-  - プロパティ: type, description
-- **CONFLICTS_WITH**: 矛盾関係
-  - プロパティ: reason
-- **REQUIRES**: 要求関係
-  - プロパティ: mandatory
-- **USES**: 使用関係
-  - プロパティ: access_type
-- **IMPLEMENTS**: 実装関係
-- **VALIDATES**: 検証関係
-- **PART_OF**: 包含関係
-
-#### 13.3.3 グラフモデル例
-```
-(User:ユーザー)-[:USES]->(Function:ログイン機能)
-                              ↓ [:REQUIRES]
-                        (Data:ユーザー情報)
-                              ↓ [:DEPENDS_ON]
-                  (NonFunctional:暗号化要件)
-```
-
-### 13.4 GraphRAG実装詳細
-
-#### 13.4.1 知識グラフ構築プロセス
-```python
-# 1. 要件定義書をセクションごとに分割
-sections = parse_requirements(requirements_text)
-
-# 2. LLMで各セクションからエンティティとリレーションを抽出
-for section in sections:
-    entities = extract_entities_with_llm(section)
-    relationships = extract_relationships_with_llm(section, entities)
-
-    # 3. Neo4jにノードとリレーションシップを作成
-    for entity in entities:
-        create_node(neo4j_driver, entity)
-
-    for rel in relationships:
-        create_relationship(neo4j_driver, rel)
-```
-
-#### 13.4.2 グラフベース分析クエリ例
-
-**依存関係の循環検出**:
-```cypher
-MATCH (r1:Requirement)-[:DEPENDS_ON*]->(r2:Requirement)
-WHERE r1 = r2
-RETURN r1, collect(distinct r2) as cycle
-```
-
-**孤立要件の検出**:
-```cypher
-MATCH (r:Requirement)
-WHERE NOT (r)-[]-()
-RETURN r
-```
-
-**機能とデータの整合性チェック**:
-```cypher
-MATCH (f:Function)-[:USES]->(d:Data)
-WHERE NOT EXISTS {
-  MATCH (d)-[:VALIDATES]->(c:Constraint)
-}
-RETURN f, d
-```
-
-**影響範囲分析**:
-```cypher
-MATCH path = (r:Requirement)-[:DEPENDS_ON*1..5]->(dependent)
-WHERE r.id = $requirement_id
-RETURN path, dependent
-```
-
-### 13.5 API拡張設計
-
-#### 13.5.1 新規エンドポイント
-- `POST /api/graph/build` - 知識グラフ構築
-- `GET /api/graph/analyze/{session_id}` - グラフ分析実行
-- `GET /api/graph/visualize/{session_id}` - グラフ可視化データ取得
-- `POST /api/review/enhanced` - GraphRAG強化レビュー
-
-#### 13.5.2 GraphRAG強化レビューAPI
-**リクエスト**:
-```json
-{
-  "requirements_text": "# 要件定義書\n...",
-  "analysis_type": "full",  // full, dependencies, conflicts, coverage
-  "include_graph": true
-}
-```
-
-**レスポンス**:
-```json
-{
-  "review_id": "review-id",
-  "graph_analysis": {
-    "nodes_count": 45,
-    "relationships_count": 78,
-    "circular_dependencies": [],
-    "isolated_requirements": [],
-    "missing_constraints": [...]
-  },
-  "issues": [...],
-  "graph_data": {
-    "nodes": [...],
-    "edges": [...]
-  },
-  "recommendations": [...]
-}
-```
-
-### 13.6 技術スタック
-
-#### 13.6.1 バックエンド追加ライブラリ
-- `neo4j`: Neo4j Pythonドライバー
-- `llama-index`: GraphRAG実装サポート
-- `networkx`: グラフアルゴリズム
-- `python-louvain`: コミュニティ検出
-
-#### 13.6.2 フロントエンド追加ライブラリ
-- `vis-network` or `cytoscape.js`: グラフ可視化
-- `d3.js`: 高度な可視化（オプション）
-- `react-force-graph`: React向けグラフコンポーネント
-
-### 13.7 実装ステップ（Phase 2）
-
-#### Step 1: Neo4j環境構築
-- Dockerを使ったNeo4jセットアップ
-- データベーススキーマ定義
-- 接続確認
-
-#### Step 2: グラフ構築サービス実装
-- エンティティ抽出ロジック
-- リレーションシップ抽出ロジック
-- Neo4jへのデータ投入
-
-#### Step 3: グラフ分析サービス実装
-- Cypherクエリ実装
-- 分析アルゴリズム実装
-- レポート生成
-
-#### Step 4: フロントエンド統合
-- グラフ可視化コンポーネント
-- 分析結果表示UI
-- インタラクティブなグラフ操作
-
-#### Step 5: テストと最適化
-- グラフクエリのパフォーマンステスト
-- 大規模要件定義書での検証
-- UI/UXの改善
-
-### 13.8 期待される成果物
-
-1. **GraphRAG強化レビューエンジン**
-   - 論理的な矛盾検出精度の向上
-   - 依存関係の可視化
-   - 影響範囲の自動計算
-
-2. **インタラクティブグラフUI**
-   - 要件間の関係を視覚的に把握
-   - ノードをクリックして詳細表示
-   - フィルタリングとズーム機能
-
-3. **高度な分析レポート**
-   - グラフ統計情報
-   - コミュニティ検出結果
-   - 重要度分析（PageRankなど）
-
-### 13.9 運用上の考慮事項
-
-#### 13.9.1 Neo4jのデプロイ
-- Docker Compose での構成
-- データバックアップ戦略
-- スケーリング計画
-
-#### 13.9.2 パフォーマンス
-- インデックス戦略
-- クエリ最適化
-- キャッシング
-
-#### 13.9.3 データ管理
-- グラフのバージョン管理
-- 定期的なクリーンアップ
-- データエクスポート機能
 
 ## 14. Git連携によるバージョン管理（Phase 2拡張）
 
-### 14.1 目的
+### 14.1 概要
 
-要件定義書の変更履歴を自動的に記録し、いつでも過去のバージョンに戻れるようにする。
-AIが要件定義書を更新するたびに、Gitで自動的にコミットすることで、変更の追跡とトレーサビリティを実現する。
+要件定義書の変更履歴を自動的に記録し、変更の追跡とトレーサビリティを実現します。
+AIが要件定義書を更新するたびに、Gitで自動的にコミットされます。
 
-### 14.2 機能概要
+### 14.2 主要機能
 
-#### 14.2.1 自動コミット機能
-- AIが要件定義書を更新するたびに自動的にGitコミット
-- コミットメッセージには変更内容の要約を自動生成
-- ユーザーの回答内容もコミットメッセージに含める
+- **自動コミット**: AI更新時に自動でGitコミット
+- **コミットメッセージ自動生成**: 変更内容と質問・回答を記録
+- **バージョン履歴表示**: 時系列で変更履歴を表示
+- **差分表示**: バージョン間の差分を確認
+- **ロールバック**: 特定のバージョンに戻す機能
+- **シンプルなブランチ戦略**: 単一ブランチ運用
 
-#### 14.2.2 バージョン履歴表示
-- 要件定義書の変更履歴を時系列で表示
-- 各バージョンの差分を確認
-- 特定のバージョンに戻す機能
+### 14.3 詳細設計
 
-#### 14.2.3 ブランチ戦略
-- シンプルに1つのブランチ（mainまたはmaster）のみを使用
-- コミット履歴で変更を追跡
-
-### 14.3 実装詳細
-
-#### 14.3.1 Gitリポジトリ初期化
-
-要件定義書保存ディレクトリをGitリポジトリとして初期化：
-```bash
-cd data/requirements
-git init
-git config user.name "Requirements AI"
-git config user.email "ai@requirement-support.local"
-```
-
-#### 14.3.2 自動コミットフロー
-
-```python
-# 要件定義書更新後
-async def save_and_commit_requirements(
-    session_id: str,
-    requirements: str,
-    commit_message: str
-):
-    # 1. ファイルを保存
-    file_path = f"data/requirements/{session_id}.md"
-    with open(file_path, "w") as f:
-        f.write(requirements)
-
-    # 2. Gitに追加
-    subprocess.run(["git", "add", file_path], cwd="data/requirements")
-
-    # 3. コミット
-    subprocess.run(
-        ["git", "commit", "-m", commit_message],
-        cwd="data/requirements"
-    )
-```
-
-#### 14.3.3 コミットメッセージ生成
-
-```python
-def generate_commit_message(question: str, answer: str, changes: str) -> str:
-    """
-    コミットメッセージを生成
-
-    例:
-    Update requirements: Add authentication details
-
-    Question: ユーザー認証は必要ですか？
-    Answer: はい、メールアドレスとパスワードでログインします
-
-    Changes:
-    - Added user authentication requirements
-    - Specified login method (email + password)
-    """
-    return f"""Update requirements: {extract_summary(changes)}
-
-Question: {question}
-Answer: {answer}
-
-Changes:
-{format_changes(changes)}
-"""
-```
-
-#### 14.3.4 バージョン履歴取得
-
-```python
-def get_version_history(session_id: str) -> List[Dict]:
-    """
-    バージョン履歴を取得
-
-    Returns:
-        [
-            {
-                "commit_hash": "abc123",
-                "timestamp": "2025-11-10 10:30:00",
-                "message": "Update requirements: Add authentication details",
-                "author": "Requirements AI"
-            }
-        ]
-    """
-    result = subprocess.run(
-        [
-            "git", "log",
-            "--format=%H|%aI|%s|%an",
-            "--", f"{session_id}.md"
-        ],
-        cwd="data/requirements",
-        capture_output=True,
-        text=True
-    )
-
-    versions = []
-    for line in result.stdout.strip().split("\n"):
-        if not line:
-            continue
-        hash, timestamp, message, author = line.split("|")
-        versions.append({
-            "commit_hash": hash,
-            "timestamp": timestamp,
-            "message": message,
-            "author": author
-        })
-
-    return versions
-```
-
-#### 14.3.5 差分表示
-
-```python
-def get_diff(session_id: str, commit_hash: str) -> str:
-    """
-    特定のコミットの差分を取得
-    """
-    result = subprocess.run(
-        [
-            "git", "show",
-            f"{commit_hash}:{session_id}.md"
-        ],
-        cwd="data/requirements",
-        capture_output=True,
-        text=True
-    )
-
-    return result.stdout
-```
-
-### 14.4 API拡張
-
-#### 14.4.1 新規エンドポイント
-
-- `GET /api/version/history/{session_id}` - バージョン履歴取得
-- `GET /api/version/diff/{session_id}/{commit_hash}` - 差分表示
-- `POST /api/version/revert/{session_id}` - 特定バージョンに戻す
-
-#### 14.4.2 バージョン履歴API
-
-**リクエスト**: `GET /api/version/history/{session_id}`
-
-**レスポンス**:
-```json
-{
-  "session_id": "session-123",
-  "versions": [
-    {
-      "commit_hash": "abc123def456",
-      "timestamp": "2025-11-10T10:30:00Z",
-      "message": "Update requirements: Add authentication details",
-      "author": "Requirements AI",
-      "short_hash": "abc123d"
-    },
-    {
-      "commit_hash": "def789ghi012",
-      "timestamp": "2025-11-10T10:25:00Z",
-      "message": "Initial requirements draft",
-      "author": "Requirements AI",
-      "short_hash": "def789g"
-    }
-  ]
-}
-```
-
-#### 14.4.3 差分表示API
-
-**リクエスト**: `GET /api/version/diff/{session_id}?from={hash1}&to={hash2}`
-
-**レスポンス**:
-```json
-{
-  "session_id": "session-123",
-  "from_commit": "abc123d",
-  "to_commit": "def789g",
-  "diff": "--- a/session-123.md\n+++ b/session-123.md\n@@ -10,0 +11,5 @@\n+## 認証機能\n+- メールアドレスとパスワードでログイン\n+- パスワードは8文字以上"
-}
-```
-
-### 14.5 UI実装
-
-#### 14.5.1 バージョン履歴パネル
-
-ブレークダウン画面に「履歴」タブを追加：
-```
-┌────────────────────────────────────────┐
-│ 要件定義書  │  AIチャット  │  履歴     │
-├────────────────────────────────────────┤
-│                                        │
-│  ⏱️  2025-11-10 10:30                  │
-│  Update requirements: Add auth details │
-│  [詳細を見る] [このバージョンに戻す]     │
-│                                        │
-│  ⏱️  2025-11-10 10:25                  │
-│  Initial requirements draft            │
-│  [詳細を見る] [このバージョンに戻す]     │
-│                                        │
-└────────────────────────────────────────┘
-```
-
-#### 14.5.2 差分表示モーダル
-
-バージョンをクリックすると差分を表示：
-```
-┌──────────────────────────────────────────┐
-│  バージョン比較                           │
-│  abc123d (2025-11-10 10:30)              │
-│  ← → def789g (2025-11-10 10:25)         │
-├──────────────────────────────────────────┤
-│                                          │
-│  + ## 認証機能                           │
-│  + - メールアドレスとパスワードでログイン  │
-│  + - パスワードは8文字以上                │
-│                                          │
-└──────────────────────────────────────────┘
-```
-
-### 14.6 技術スタック
-
-#### 14.6.1 バックエンド追加ライブラリ
-- `gitpython`: PythonからGitを操作（オプション）
-- または標準の`subprocess`モジュールを使用
-
-#### 14.6.2 フロントエンド追加ライブラリ
-- `react-diff-viewer`: 差分表示コンポーネント
-
-### 14.7 実装ステップ
-
-1. **Gitリポジトリ初期化**
-   - data/requirementsディレクトリをGitリポジトリ化
-   - .gitignoreの設定
-
-2. **バックエンド実装**
-   - バージョン管理サービス実装
-   - 自動コミット機能
-   - 履歴取得API
-   - 差分取得API
-
-3. **フロントエンド実装**
-   - 履歴表示コンポーネント
-   - 差分表示モーダル
-   - バージョン復元機能
-
-4. **テストと検証**
-   - コミット機能のテスト
-   - 履歴表示のテスト
-   - 差分表示のテスト
-
-### 14.8 運用上の考慮事項
-
-#### 14.8.1 データバックアップ
-- Gitリポジトリ全体の定期バックアップ
-- リモートリポジトリへのプッシュ（オプション）
-
-#### 14.8.2 容量管理
-- 古いセッションの定期的なアーカイブ
-- Git履歴の圧縮（git gc）
-
-#### 14.8.3 セキュリティ
-- 要件定義書に機密情報が含まれる場合の暗号化
-- アクセス制御
+詳細な実装仕様、API設計、UI設計は以下を参照：
+- **[docs/architecture.md](docs/architecture.md)** - 全体アーキテクチャ（セクション5.2）
 
 ---
 
-**文書バージョン**: 1.2
+**文書バージョン**: 1.3
 **作成日**: 2025-11-10
 **最終更新日**: 2025-11-10
-**更新内容**:
-- GraphRAG + Neo4j統合計画を追加
-- Git連携によるバージョン管理計画を追加
+**更新履歴**:
+- v1.3: アーキテクチャ仕様を別ドキュメントに分離（docs/architecture.md）
+- v1.2: GraphRAG + Neo4j統合計画、Git連携バージョン管理計画を追加
+- v1.1: GraphRAG + Neo4j統合計画を追加
+- v1.0: 初版作成
+
+**関連ドキュメント**:
+- [docs/architecture.md](docs/architecture.md) - アーキテクチャ仕様書
+- [docs/graphrag-architecture.md](docs/graphrag-architecture.md) - GraphRAG実装ガイド
