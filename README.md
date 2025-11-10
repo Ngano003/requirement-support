@@ -2,6 +2,13 @@
 
 要件定義作業を支援するAIシステムです。打ち合わせの記録から要件定義書を自動生成し、対話形式で要件を洗い出し、漏れや矛盾をチェックします。
 
+## 📚 ドキュメント
+
+- **[使い方ガイド](docs/USAGE.md)** ← まずはこちらをお読みください！
+- [要件定義書](requirements.md) - プロジェクトの要件
+- [アーキテクチャ仕様](docs/architecture.md) - 技術仕様
+- [GraphRAG実装ガイド](docs/graphrag-architecture.md) - Phase 2拡張
+
 ## 機能
 
 ### 1. 要件定義のブレークダウン機能
@@ -44,13 +51,40 @@ requirement-support/
 └── requirements.md    # プロジェクトの要件定義書
 ```
 
+## 🚀 クイックスタート
+
+```bash
+# 1. バックエンドセットアップ
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# .envを編集してAPIキーを設定
+
+# 2. フロントエンドセットアップ
+cd ../frontend
+npm install
+
+# 3. 起動
+# ターミナル1: バックエンド
+cd backend && uvicorn app.main:app --reload --port 8001
+
+# ターミナル2: フロントエンド
+cd frontend && npm run dev
+
+# 4. ブラウザで http://localhost:3000 を開く
+```
+
+詳しい手順は **[使い方ガイド](docs/USAGE.md)** を参照してください。
+
 ## セットアップ
 
 ### 前提条件
 
 - Python 3.10以上
 - Node.js 18以上
-- vLLMサーバー（Qwen3-Coderモデル）が動作していること
+- **OpenRouter APIキー**（テスト用）または **vLLMサーバー**（本番用）
 
 ### バックエンドのセットアップ
 
@@ -62,9 +96,19 @@ pip install -r requirements.txt
 ```
 
 環境変数の設定（`.env`ファイルを作成）:
+
+**テスト・開発環境（OpenRouter）**:
+```env
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-api-key-here
+OPENROUTER_MODEL=qwen/qwen-2.5-coder-32b-instruct
 ```
+
+**本番環境（vLLM）**:
+```env
+LLM_PROVIDER=vllm
 VLLM_API_BASE=http://localhost:8000/v1
-VLLM_API_KEY=your-api-key-if-needed
+VLLM_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
 ```
 
 バックエンドの起動:
@@ -91,10 +135,20 @@ npm run dev
 
 ## 使い方
 
+詳しい使い方は **[使い方ガイド](docs/USAGE.md)** を参照してください。
+
+### 基本的な流れ
+
 1. フロントエンド（http://localhost:3000）にアクセス
 2. 「要件定義のブレークダウン」または「要件定義書のレビュー」を選択
-3. テキストを入力またはファイルをアップロード
+3. テキストを入力
 4. AIの指示に従って要件定義を進める
+
+### UI構成（ブレークダウン機能）
+
+- **左パネル**: 要件定義書のリアルタイムプレビュー
+- **右パネル**: AIとのチャットインターフェース
+- 質問に答えると、左側の要件定義書が自動更新されます
 
 ## API仕様
 
