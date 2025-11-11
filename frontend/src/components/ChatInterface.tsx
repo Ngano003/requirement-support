@@ -15,6 +15,7 @@ interface ChatInterfaceProps {
   onAnswer: (questionId: string, answer: string) => void;
   isLoading: boolean;
   completionRate: number;
+  isRestoredSession?: boolean;
 }
 
 export default function ChatInterface({
@@ -22,10 +23,12 @@ export default function ChatInterface({
   onAnswer,
   isLoading,
   completionRate,
+  isRestoredSession = false,
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState("");
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [displayedQuestionIds, setDisplayedQuestionIds] = useState<Set<string>>(new Set());
+  const [isInitialized, setIsInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -36,24 +39,41 @@ export default function ChatInterface({
     scrollToBottom();
   }, [messages]);
 
+  // 初期化: 復元されたセッションでも通常の初期化のみ実行
   useEffect(() => {
-    if (questions.length > 0 && currentQuestionIndex < questions.length) {
-      const question = questions[currentQuestionIndex];
+    if (!isInitialized) {
+      setIsInitialized(true);
+    }
+  }, [isInitialized]);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    // 配列の最初の未表示の質問を見つけて表示
+    const nextQuestion = questions.find(q => !displayedQuestionIds.has(q.id));
+
+    if (nextQuestion) {
       setMessages((prev) => [
         ...prev,
         {
           type: "question",
-          content: question.question,
-          question: question,
+          content: nextQuestion.question,
+          question: nextQuestion,
         },
       ]);
+
+      // 表示済みとしてマーク
+      setDisplayedQuestionIds((prev) => new Set(prev).add(nextQuestion.id));
     }
-  }, [questions, currentQuestionIndex]);
+    // displayedQuestionIdsを依存配列から除外して無限ループを防ぐ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questions, isInitialized]);
 
   const handleSubmitAnswer = () => {
     if (!currentAnswer.trim() || isLoading) return;
 
-    const currentQuestion = questions[currentQuestionIndex];
+    // 現在回答すべき質問は、表示済みの質問の中で最初のもの
+    const currentQuestion = questions.find(q => displayedQuestionIds.has(q.id));
     if (!currentQuestion) return;
 
     // 回答をメッセージに追加
@@ -70,9 +90,6 @@ export default function ChatInterface({
 
     // 入力をクリア
     setCurrentAnswer("");
-
-    // 次の質問へ
-    setCurrentQuestionIndex((prev) => prev + 1);
   };
 
   const getPriorityColor = (priority: string) => {
@@ -213,7 +230,7 @@ export default function ChatInterface({
 
       {/* 入力エリア */}
       <div className="p-4 border-t bg-white">
-        {currentQuestionIndex < questions.length ? (
+        {questions.length > 0 && questions.some(q => displayedQuestionIds.has(q.id)) ? (
           <div className="flex gap-2">
             <input
               type="text"
@@ -238,9 +255,13 @@ export default function ChatInterface({
               送信
             </button>
           </div>
-        ) : (
+        ) : questions.length === 0 ? (
           <div className="text-center text-green-600 font-semibold">
             全ての質問に回答しました！
+          </div>
+        ) : (
+          <div className="text-center text-gray-500">
+            質問が表示されるまでお待ちください...
           </div>
         )}
       </div>

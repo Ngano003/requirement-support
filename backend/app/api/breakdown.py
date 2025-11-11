@@ -55,6 +55,9 @@ async def initialize_breakdown(request: BreakdownInitializeRequest):
         )
 
     except Exception as e:
+        import traceback
+        error_detail = f"初期化エラー: {str(e)}\n{traceback.format_exc()}"
+        print(error_detail)
         raise HTTPException(status_code=500, detail=f"初期化エラー: {str(e)}")
 
 

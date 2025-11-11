@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    volumes:
+      # Mount the entire workspace for devcontainer
+      - ..:/workspace:cached
+      - ./backend:/app:cached
+      - ../data:/data:cached
+
+    # Override command to keep container running for devcontainer
+    command: /bin/sh -c "while sleep 1000; do :; done"
+
+    # Add development tools
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+
+  frontend:
+    volumes:
+      # Mount the entire workspace for devcontainer
+      - ..:/workspace:cached
+      - ./frontend:/app:cached
+      - /app/node_modules
+      - /app/.next
+
+    # Override command to keep container running for devcontainer
+    command: /bin/sh -c "while sleep 1000; do :; done"

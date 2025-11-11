@@ -1,11 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { apiClient, Question } from "@/lib/api";
 import MarkdownViewer from "@/components/MarkdownViewer";
 import ChatInterface from "@/components/ChatInterface";
-import { ArrowLeft, Download } from "lucide-react";
+import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import Link from "next/link";
+
+const STORAGE_KEY = "breakdown_session";
+
+interface SessionState {
+  sessionId: string;
+  step: "input" | "chat";
+  inputText: string;
+}
 
 export default function BreakdownPage() {
   const [step, setStep] = useState<"input" | "chat">("input");
@@ -15,6 +23,55 @@ export default function BreakdownPage() {
   const [completionRate, setCompletionRate] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [inputText, setInputText] = useState<string>("");
+  const [isRestoring, setIsRestoring] = useState<boolean>(true);
+  const [isRestoredSession, setIsRestoredSession] = useState<boolean>(false);
+
+  // ページロード時にセッションを復元
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const savedState = localStorage.getItem(STORAGE_KEY);
+        if (savedState) {
+          const state: SessionState = JSON.parse(savedState);
+
+          if (state.sessionId && state.step === "chat") {
+            // バックエンドからセッション状態を取得
+            const status = await apiClient.getBreakdownStatus(state.sessionId);
+
+            setSessionId(state.sessionId);
+            setRequirements(status.requirements);
+            setQuestions(status.remaining_questions);
+            setCompletionRate(status.completion_rate);
+            setStep("chat");
+            setIsRestoredSession(true); // 復元されたセッションとしてマーク
+          } else if (state.inputText) {
+            // 入力テキストだけ復元
+            setInputText(state.inputText);
+          }
+        }
+      } catch (error) {
+        console.error("セッション復元エラー:", error);
+        // エラーの場合はストレージをクリア
+        localStorage.removeItem(STORAGE_KEY);
+      } finally {
+        setIsRestoring(false);
+      }
+    };
+
+    restoreSession();
+  }, []);
+
+  // セッション状態を保存
+  useEffect(() => {
+    if (!isRestoring) {
+      const state: SessionState = {
+        sessionId,
+        step,
+        inputText,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+  }, [sessionId, step, inputText, isRestoring]);
 
   // 初期化処理
   const handleInitialize = async () => {
@@ -81,6 +138,32 @@ export default function BreakdownPage() {
     URL.revokeObjectURL(url);
   };
 
+  // 新規セッション開始
+  const handleNewSession = () => {
+    if (confirm("新しいセッションを開始しますか？現在の進行状況は保存されません。")) {
+      localStorage.removeItem(STORAGE_KEY);
+      setStep("input");
+      setSessionId("");
+      setRequirements("");
+      setQuestions([]);
+      setCompletionRate(0);
+      setInputText("");
+      setIsRestoredSession(false);
+    }
+  };
+
+  // 復元中の表示
+  if (isRestoring) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <RefreshCw className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">セッションを復元中...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen flex flex-col">
       {/* ヘッダー */}
@@ -97,15 +180,26 @@ export default function BreakdownPage() {
             要件定義のブレークダウン
           </h1>
         </div>
-        {step === "chat" && (
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <Download size={16} />
-            ダウンロード
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {step === "chat" && (
+            <>
+              <button
+                onClick={handleDownload}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                <Download size={16} />
+                ダウンロード
+              </button>
+              <button
+                onClick={handleNewSession}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+              >
+                <RefreshCw size={16} />
+                新規セッション
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       {/* メインコンテンツ */}
@@ -156,6 +250,7 @@ export default function BreakdownPage() {
               onAnswer={handleAnswer}
               isLoading={isLoading}
               completionRate={completionRate}
+              isRestoredSession={isRestoredSession}
             />
           </div>
         </div>

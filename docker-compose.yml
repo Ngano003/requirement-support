@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: development
+    container_name: requirement-support-backend
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-openrouter}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-qwen/qwen-2.5-coder-32b-instruct}
+      - VLLM_API_BASE=${VLLM_API_BASE:-http://localhost:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-Coder-32B-Instruct}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - DATA_DIR=/data
+      - MAX_TOKENS=${MAX_TOKENS:-4096}
+      - TEMPERATURE=${TEMPERATURE:-0.7}
+    networks:
+      - requirement-support-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    container_name: requirement-support-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
+    networks:
+      - requirement-support-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+networks:
+  requirement-support-network:
+    driver: bridge
+
+volumes:
+  data:

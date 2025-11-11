@@ -25,7 +25,10 @@
 
 - **バックエンド**: Python + FastAPI
 - **フロントエンド**: Next.js + TypeScript
-- **LLM**: vLLM (Qwen3-Coder) - OpenAI互換API
+- **LLM**:
+  - Google AI Studio (Gemini 2.0 Flash) - 無料枠推奨
+  - OpenRouter - 開発・テスト用
+  - vLLM (Qwen3-Coder) - プロダクション用
 
 ## ディレクトリ構成
 
@@ -53,6 +56,31 @@ requirement-support/
 
 ## 🚀 クイックスタート
 
+### 🐳 Docker Composeで起動（推奨）
+
+最も簡単な方法です：
+
+```bash
+# 1. 環境変数を設定
+cp .env.example .env
+# .envを編集してOpenRouter APIキーを設定
+
+# 2. 起動（これだけ！）
+docker-compose up
+
+# または、バックグラウンドで起動
+docker-compose up -d
+```
+
+起動後、以下にアクセス：
+- **フロントエンド**: http://localhost:3000
+- **バックエンドAPI**: http://localhost:8001
+- **API仕様書**: http://localhost:8001/docs
+
+### 💻 手動セットアップ
+
+Dockerを使わない場合：
+
 ```bash
 # 1. バックエンドセットアップ
 cd backend
@@ -65,6 +93,7 @@ cp .env.example .env
 # 2. フロントエンドセットアップ
 cd ../frontend
 npm install
+cp .env.example .env.local
 
 # 3. 起動
 # ターミナル1: バックエンド
@@ -82,20 +111,40 @@ cd frontend && npm run dev
 
 ### 前提条件
 
+#### Docker使用の場合（推奨）
+- Docker
+- Docker Compose
+- **OpenRouter APIキー**（テスト用）または **vLLMサーバー**（本番用）
+
+#### 手動セットアップの場合
 - Python 3.10以上
 - Node.js 18以上
 - **OpenRouter APIキー**（テスト用）または **vLLMサーバー**（本番用）
 
-### バックエンドのセットアップ
+### Docker Composeでのセットアップ（推奨）
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+# 1. 環境変数を設定
+cp .env.example .env
+# .envを編集してAPIキーを設定
+
+# 2. 起動
+docker-compose up
+
+# バックグラウンドで起動する場合
+docker-compose up -d
+
+# ログを確認
+docker-compose logs -f
+
+# 停止
+docker-compose down
+
+# コンテナを再ビルド
+docker-compose up --build
 ```
 
-環境変数の設定（`.env`ファイルを作成）:
+環境変数の設定（`.env`ファイル）:
 
 **テスト・開発環境（OpenRouter）**:
 ```env
@@ -111,27 +160,42 @@ VLLM_API_BASE=http://localhost:8000/v1
 VLLM_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
 ```
 
+### 手動セットアップ
+
+<details>
+<summary>Dockerを使わずに手動でセットアップする場合</summary>
+
+#### バックエンドのセットアップ
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# .envを編集してAPIキーを設定
+```
+
 バックエンドの起動:
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-### フロントエンドのセットアップ
+#### フロントエンドのセットアップ
 
 ```bash
 cd frontend
 npm install
-```
-
-環境変数の設定（`.env.local`ファイルを作成）:
-```
-NEXT_PUBLIC_API_URL=http://localhost:8001
+cp .env.example .env.local
+# .env.localを編集（必要に応じて）
 ```
 
 フロントエンドの起動:
 ```bash
 npm run dev
 ```
+
+</details>
 
 ## 使い方
 
@@ -163,16 +227,49 @@ npm run dev
 
 ## 開発
 
-### バックエンドのテスト
+### Docker環境での開発
 
 ```bash
-cd backend
-pytest
+# 開発モードで起動（ホットリロード有効）
+docker-compose up
+
+# コンテナ内でコマンドを実行
+docker-compose exec backend pytest
+docker-compose exec frontend npm run lint
+
+# コンテナのシェルに入る
+docker-compose exec backend bash
+docker-compose exec frontend sh
 ```
 
-### フロントエンドのテスト
+### VS Code Dev Container
+
+VS Codeで開発する場合、Dev Containerを使用できます：
+
+1. VS Codeで「Dev Containers」拡張機能をインストール
+2. `F1` → "Dev Containers: Reopen in Container"
+3. コンテナ内で開発（Python/Node.js環境完備）
+
+### テスト
+
+#### Docker環境
 
 ```bash
+# バックエンドのテスト
+docker-compose exec backend pytest
+
+# フロントエンドのテスト
+docker-compose exec frontend npm run test
+```
+
+#### ローカル環境
+
+```bash
+# バックエンド
+cd backend
+pytest
+
+# フロントエンド
 cd frontend
 npm run test
 ```

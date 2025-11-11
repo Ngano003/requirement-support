@@ -87,10 +87,12 @@ class BreakdownService:
 - エラーハンドリング、セキュリティ、パフォーマンスなどの非機能要件も考慮
 - 各質問について以下の情報を含める：
   - id: 一意の識別子（q1, q2, ...）
-  - category: functional, non_functional, constraint, other
+  - category: 必ず次のいずれかを使用 → functional, non_functional, constraint, other
   - question: 質問文
-  - priority: high, medium, low
+  - priority: 必ず次のいずれかを使用 → high, medium, low
   - context: 質問の背景（オプション）
+
+**重要**: categoryは必ず "functional", "non_functional", "constraint", "other" のいずれか、priorityは必ず "high", "medium", "low" のいずれかを使用してください。
 
 JSON形式で出力してください：
 ```json
@@ -185,6 +187,8 @@ JSON配列のみを出力してください。他の説明は不要です。
 - 既に明確になった点については質問しない
 - 要件定義書の品質を高めるための追加質問をする
 - 最大5個の質問を生成する
+- categoryは必ず "functional", "non_functional", "constraint", "other" のいずれかを使用
+- priorityは必ず "high", "medium", "low" のいずれかを使用
 
 JSON形式で出力してください：
 ```json
@@ -237,8 +241,30 @@ JSON配列のみを出力してください。他の説明は不要です。
             # JSONをパース
             questions_data = json.loads(json_str)
 
-            # Questionオブジェクトに変換
-            questions = [Question(**q) for q in questions_data]
+            # Questionオブジェクトに変換（バリデーションエラーを処理）
+            questions = []
+            valid_categories = ["functional", "non_functional", "constraint", "other"]
+            valid_priorities = ["high", "medium", "low"]
+
+            for q_data in questions_data:
+                # カテゴリの正規化
+                if "category" in q_data and q_data["category"] not in valid_categories:
+                    print(f"Invalid category '{q_data['category']}', replacing with 'other'")
+                    q_data["category"] = "other"
+
+                # 優先度の正規化
+                if "priority" in q_data and q_data["priority"] not in valid_priorities:
+                    print(f"Invalid priority '{q_data['priority']}', replacing with 'medium'")
+                    q_data["priority"] = "medium"
+
+                try:
+                    question = Question(**q_data)
+                    questions.append(question)
+                except Exception as e:
+                    print(f"Error creating Question object: {e}")
+                    print(f"Question data: {q_data}")
+                    # エラーが発生した質問はスキップ
+                    continue
 
             return questions
 

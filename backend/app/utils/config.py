@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """アプリケーション設定"""
 
     # LLMプロバイダー設定
-    llm_provider: Literal["openrouter", "vllm"] = "openrouter"
+    llm_provider: Literal["openrouter", "vllm", "google_ai"] = "openrouter"
 
     # OpenRouter設定
     openrouter_api_key: str = ""
@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     vllm_api_base: str = "http://localhost:8000/v1"
     vllm_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
     vllm_api_key: str = ""
+
+    # Google AI Studio設定
+    google_ai_api_key: str = ""
+    google_ai_model: str = "gemini-2.0-flash-exp"
 
     # アプリケーション設定
     data_dir: str = "../data"
@@ -37,6 +41,8 @@ class Settings(BaseSettings):
         """使用するLLMプロバイダーのAPIキーを返す"""
         if self.llm_provider == "openrouter":
             return self.openrouter_api_key
+        elif self.llm_provider == "google_ai":
+            return self.google_ai_api_key
         return self.vllm_api_key
 
     @property
@@ -51,6 +57,8 @@ class Settings(BaseSettings):
         """使用するモデル名を返す"""
         if self.llm_provider == "openrouter":
             return self.openrouter_model
+        elif self.llm_provider == "google_ai":
+            return self.google_ai_model
         return self.vllm_model
 
 

@@ -1,6 +1,6 @@
 """
 LLMサービス
-OpenRouterまたはvLLMと通信するためのサービス
+OpenRouter、vLLM、またはGoogle AI Studioと通信するためのサービス
 """
 from typing import List, Optional
 from openai import AsyncOpenAI
@@ -12,10 +12,22 @@ class LLMService:
 
     def __init__(self):
         """初期化"""
-        self.client = AsyncOpenAI(
-            api_key=settings.api_key,
-            base_url=settings.base_url,
-        )
+        self.provider = settings.llm_provider
+
+        if self.provider == "google_ai":
+            # Google AI Studioの場合
+            import google.generativeai as genai
+            genai.configure(api_key=settings.api_key)
+            self.google_client = genai.GenerativeModel(settings.model_name)
+            self.client = None
+        else:
+            # OpenRouterまたはvLLMの場合
+            self.client = AsyncOpenAI(
+                api_key=settings.api_key,
+                base_url=settings.base_url,
+            )
+            self.google_client = None
+
         self.model = settings.model_name
         self.max_tokens = settings.max_tokens
         self.temperature = settings.temperature
@@ -38,14 +50,46 @@ class LLMService:
             生成されたテキスト
         """
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature or self.temperature,
-                max_tokens=max_tokens or self.max_tokens,
-            )
+            if self.provider == "google_ai":
+                # Google AI Studioの場合
+                import google.generativeai as genai
 
-            return response.choices[0].message.content
+                # メッセージを結合してプロンプトに変換
+                prompt = ""
+                for msg in messages:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    if role == "system":
+                        prompt += f"System: {content}\n\n"
+                    elif role == "user":
+                        prompt += f"User: {content}\n\n"
+                    elif role == "assistant":
+                        prompt += f"Assistant: {content}\n\n"
+
+                # 生成設定
+                generation_config = genai.GenerationConfig(
+                    temperature=temperature or self.temperature,
+                    max_output_tokens=max_tokens or self.max_tokens,
+                )
+
+                # テキスト生成（非同期）
+                response = await self.google_client.generate_content_async(
+                    prompt,
+                    generation_config=generation_config,
+                )
+
+                return response.text
+
+            else:
+                # OpenRouterまたはvLLMの場合
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=temperature or self.temperature,
+                    max_tokens=max_tokens or self.max_tokens,
+                )
+
+                return response.choices[0].message.content
 
         except Exception as e:
             raise Exception(f"LLM生成エラー: {str(e)}")
