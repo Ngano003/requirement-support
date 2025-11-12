@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     data_dir: str = "../data"
     max_tokens: int = 4096
     temperature: float = 0.7
+    max_questions: int = 15  # 生成する質問の最大数
 
     model_config = SettingsConfigDict(
         env_file=".env",

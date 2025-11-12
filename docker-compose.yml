@@ -23,6 +23,7 @@ services:
       - DATA_DIR=/data
       - MAX_TOKENS=${MAX_TOKENS:-4096}
       - TEMPERATURE=${TEMPERATURE:-0.7}
+      - MAX_QUESTIONS=${MAX_QUESTIONS:-5}
     networks:
       - requirement-support-network
     restart: unless-stopped

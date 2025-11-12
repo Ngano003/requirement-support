@@ -29,6 +29,9 @@ export default function BreakdownPage() {
   const [totalCount, setTotalCount] = useState<number>(0);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null);
+  const [systemMessage, setSystemMessage] = useState<string | null>(null);
+  const [updateSummary, setUpdateSummary] = useState<string | null>(null);
+  const [nextQuestionsMessage, setNextQuestionsMessage] = useState<string | null>(null);
 
   // ページロード時にセッションを復元
   useEffect(() => {
@@ -97,6 +100,9 @@ export default function BreakdownPage() {
       setCompletionRate(response.completion_rate);
       setAnsweredCount(response.answered_count);
       setTotalCount(response.total_count);
+      if (response.system_message) {
+        setSystemMessage(response.system_message);
+      }
       setStep("chat");
     } catch (error) {
       console.error("初期化エラー:", error);
@@ -134,15 +140,36 @@ export default function BreakdownPage() {
 
       // 全質問に回答した場合、要件定義書が更新される
       if (response.all_answered) {
+        // 1. システムメッセージ表示（更新開始）
+        if (response.system_message) {
+          setSystemMessage(response.system_message);
+        }
+
         setIsUpdating(true);
-        // 要件定義書を更新
+
+        // 要件定義書を更新（バックグラウンド）
         setRequirements(response.updated_requirements);
-        // 新しい質問を追加
-        setQuestions(response.new_questions);
-        // カウンターをリセット
-        setAnsweredCount(0);
-        setTotalCount(response.new_questions.length);
-        setIsUpdating(false);
+
+        // 2. 更新要点を2秒後に表示（AIが処理している感じ）
+        setTimeout(() => {
+          setIsUpdating(false);
+          if (response.update_summary) {
+            setUpdateSummary(response.update_summary);
+          }
+
+          // 3. 次の質問についてのメッセージを2秒後に表示
+          setTimeout(() => {
+            // 新しい質問を追加
+            setQuestions(response.new_questions);
+            // カウンターをリセット
+            setAnsweredCount(0);
+            setTotalCount(response.new_questions.length);
+
+            if (response.next_questions_message) {
+              setNextQuestionsMessage(response.next_questions_message);
+            }
+          }, 2000);
+        }, 2000);
       }
 
       setCompletionRate(response.completion_rate);
@@ -181,6 +208,13 @@ export default function BreakdownPage() {
       setCompletionRate(0);
       setInputText("");
       setIsRestoredSession(false);
+      setAnsweredCount(0);
+      setTotalCount(0);
+      setIsUpdating(false);
+      setFollowUpQuestion(null);
+      setSystemMessage(null);
+      setUpdateSummary(null);
+      setNextQuestionsMessage(null);
     }
   };
 
@@ -287,6 +321,9 @@ export default function BreakdownPage() {
               totalCount={totalCount}
               isUpdating={isUpdating}
               followUpQuestion={followUpQuestion}
+              systemMessage={systemMessage}
+              updateSummary={updateSummary}
+              nextQuestionsMessage={nextQuestionsMessage}
             />
           </div>
         </div>

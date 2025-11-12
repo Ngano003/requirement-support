@@ -5,7 +5,7 @@ import { Question } from "@/lib/api";
 import { Send, CheckCircle } from "lucide-react";
 
 interface Message {
-  type: "question" | "answer" | "system" | "follow_up";
+  type: "question" | "answer" | "system" | "follow_up" | "update_summary";
   content: string;
   question?: Question;
 }
@@ -20,6 +20,9 @@ interface ChatInterfaceProps {
   totalCount?: number;
   isUpdating?: boolean;
   followUpQuestion?: string | null;
+  systemMessage?: string | null;
+  updateSummary?: string | null;
+  nextQuestionsMessage?: string | null;
 }
 
 export default function ChatInterface({
@@ -32,12 +35,20 @@ export default function ChatInterface({
   totalCount = 0,
   isUpdating = false,
   followUpQuestion = null,
+  systemMessage = null,
+  updateSummary = null,
+  nextQuestionsMessage = null,
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState("");
   const [displayedQuestionIds, setDisplayedQuestionIds] = useState<Set<string>>(new Set());
   const [isInitialized, setIsInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const lastSystemMessage = useRef<string | null>(null);
+  const lastUpdateSummary = useRef<string | null>(null);
+  const lastFollowUpQuestion = useRef<string | null>(null);
+  const lastNextQuestionsMessage = useRef<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -79,7 +90,8 @@ export default function ChatInterface({
 
   // 追加質問を表示
   useEffect(() => {
-    if (followUpQuestion) {
+    if (followUpQuestion && followUpQuestion !== lastFollowUpQuestion.current) {
+      lastFollowUpQuestion.current = followUpQuestion;
       setMessages((prev) => [
         ...prev,
         {
@@ -89,6 +101,55 @@ export default function ChatInterface({
       ]);
     }
   }, [followUpQuestion]);
+
+  // システムメッセージを表示
+  useEffect(() => {
+    if (systemMessage && systemMessage !== lastSystemMessage.current) {
+      lastSystemMessage.current = systemMessage;
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "system",
+          content: systemMessage,
+        },
+      ]);
+    }
+  }, [systemMessage]);
+
+  // 更新要点を表示
+  useEffect(() => {
+    if (updateSummary && updateSummary !== lastUpdateSummary.current) {
+      lastUpdateSummary.current = updateSummary;
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "update_summary",
+          content: updateSummary,
+        },
+      ]);
+    }
+  }, [updateSummary]);
+
+  // 次の質問についてのメッセージを表示
+  useEffect(() => {
+    if (nextQuestionsMessage && nextQuestionsMessage !== lastNextQuestionsMessage.current) {
+      lastNextQuestionsMessage.current = nextQuestionsMessage;
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "system",
+          content: nextQuestionsMessage,
+        },
+      ]);
+    }
+  }, [nextQuestionsMessage]);
+
+  // 質問が表示されて回答可能になったら入力欄にフォーカス
+  useEffect(() => {
+    if (questions.length > 0 && !isLoading && !isUpdating && displayedQuestionIds.size > 0) {
+      inputRef.current?.focus();
+    }
+  }, [questions, isLoading, isUpdating, displayedQuestionIds]);
 
   const handleSubmitAnswer = () => {
     if (!currentAnswer.trim() || isLoading) return;
@@ -159,13 +220,6 @@ export default function ChatInterface({
             style={{ width: `${completionRate}%` }}
           />
         </div>
-        {/* 更新中メッセージ */}
-        {isUpdating && (
-          <div className="mt-2 text-sm text-orange-600 font-medium flex items-center gap-2">
-            <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin" />
-            要件定義書を更新中...
-          </div>
-        )}
       </div>
 
       {/* メッセージエリア */}
@@ -222,10 +276,14 @@ export default function ChatInterface({
             )}
 
             {message.type === "system" && (
-              <div className="flex justify-center">
-                <div className="bg-green-50 text-green-800 rounded-lg px-4 py-2 text-sm flex items-center gap-2">
-                  <CheckCircle size={16} />
-                  {message.content}
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-500 text-white flex items-center justify-center font-semibold">
+                  AI
+                </div>
+                <div className="flex-1">
+                  <div className="bg-green-50 border-l-4 border-green-500 rounded-lg p-4 shadow-sm">
+                    <p className="text-gray-800">{message.content}</p>
+                  </div>
                 </div>
               </div>
             )}
@@ -245,10 +303,28 @@ export default function ChatInterface({
                 </div>
               </div>
             )}
+
+            {message.type === "update_summary" && (
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-500 text-white flex items-center justify-center font-semibold">
+                  AI
+                </div>
+                <div className="flex-1">
+                  <div className="bg-purple-50 border-l-4 border-purple-500 rounded-lg p-4 shadow-sm">
+                    <div className="text-xs font-semibold text-purple-700 mb-2">
+                      更新内容
+                    </div>
+                    <div className="text-gray-800 prose prose-sm">
+                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
 
-        {isLoading && (
+        {(isLoading || isUpdating) && (
           <div className="flex gap-3">
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center font-semibold">
               AI
@@ -277,6 +353,7 @@ export default function ChatInterface({
         {questions.length > 0 && questions.some(q => displayedQuestionIds.has(q.id)) ? (
           <div className="flex gap-2">
             <input
+              ref={inputRef}
               type="text"
               value={currentAnswer}
               onChange={(e) => setCurrentAnswer(e.target.value)}
@@ -288,12 +365,12 @@ export default function ChatInterface({
               }}
               placeholder="回答を入力してください..."
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={isLoading}
+              disabled={isLoading || isUpdating}
             />
             <button
               onClick={handleSubmitAnswer}
-              disabled={!currentAnswer.trim() || isLoading}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
+              disabled={!currentAnswer.trim() || isLoading || isUpdating}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
             >
               <Send size={16} />
               送信

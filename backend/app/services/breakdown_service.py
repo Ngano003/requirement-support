@@ -6,6 +6,7 @@ import uuid
 from typing import List, Tuple, Optional
 from app.models.schemas import Question, SessionData
 from app.services.llm_service import llm_service
+from app.utils.config import settings
 
 
 class BreakdownService:
@@ -91,6 +92,7 @@ class BreakdownService:
 【指示】
 - 不明瞭な点や不足している情報について質問する
 - エラーハンドリング、セキュリティ、パフォーマンスなどの非機能要件も考慮
+- **重要度の高い質問に絞り込み、最大{settings.max_questions}個程度にする**
 - 各質問について以下の情報を含める：
   - id: 一意の識別子（q1, q2, ...）
   - category: 必ず次のいずれかを使用 → functional, non_functional, constraint, other
@@ -143,6 +145,7 @@ JSON配列のみを出力してください。他の説明は不要です。
         self,
         question: str,
         answer: str,
+        conversation_history: Optional[List[Tuple[str, str]]] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         回答が質問に対して適切かどうかを評価
@@ -150,29 +153,45 @@ JSON配列のみを出力してください。他の説明は不要です。
         Args:
             question: 質問文
             answer: ユーザーの回答
+            conversation_history: これまでの会話履歴 [(質問, 回答), ...]
 
         Returns:
             (is_valid, follow_up_question):
             - is_valid: 回答が妥当ならTrue
             - follow_up_question: 不十分な場合の追加質問（妥当な場合はNone）
         """
-        validation_prompt = f"""以下の質問と回答を評価してください。
+        # 会話履歴を整形
+        history_text = ""
+        if conversation_history and len(conversation_history) > 0:
+            history_text = "\n【これまでの会話履歴】\n"
+            for i, (prev_q, prev_a) in enumerate(conversation_history, 1):
+                history_text += f"{i}. Q: {prev_q}\n   A: {prev_a}\n\n"
 
-【質問】
+        # デバッグログ
+        print(f"[DEBUG] validate_answer called")
+        print(f"[DEBUG] Question: {question}")
+        print(f"[DEBUG] Answer: {answer}")
+        print(f"[DEBUG] History length: {len(conversation_history) if conversation_history else 0}")
+        print(f"[DEBUG] History text: {history_text}")
+
+        validation_prompt = f"""以下の質問と回答を評価してください。
+{history_text}
+【今回の質問】
 {question}
 
-【回答】
+【今回の回答】
 {answer}
 
 【評価基準】
 1. 回答が質問に対して直接的に答えているか
-2. 回答が具体的で実装可能な内容か
+2. 回答が具体的で実装可能な内容か、または「未確定」「不明」「決まっていない」と明示されているか
 3. 回答が曖昧でないか
+4. **会話履歴がある場合、前回の回答と組み合わせて評価する**（今回の回答は前回の補足として扱う）
 
 【指示】
 回答を評価し、以下のJSON形式で出力してください：
 
-- 回答が妥当な場合：
+- 回答が妥当な場合（具体的な回答、または「未確定」「不明」「決まっていない」と明示している場合）：
 ```json
 {{"is_valid": true, "reason": "評価理由"}}
 ```
@@ -183,8 +202,9 @@ JSON配列のみを出力してください。他の説明は不要です。
 ```
 
 **重要**：
-- 「特になし」「任せます」「わかりません」などの曖昧な回答はis_valid=false
-- 質問の観点に対して具体的な情報がない場合もis_valid=false
+- 「未確定」「不明」「決まっていない」「まだ決まっていない」などの回答はis_valid=true（現段階で決まっていないことを明示しているため）
+- 「特になし」「任せます」など、検討したのか不明な曖昧な回答はis_valid=false
+- 質問に対して何も答えていない場合はis_valid=false
 - 追加質問は元の質問を言い換えて、より答えやすくする
 
 JSON形式のみを出力してください。
@@ -242,11 +262,26 @@ JSON形式のみを出力してください。
         if not question:
             raise ValueError(f"質問ID {question_id} が見つかりません")
 
-        # 回答の妥当性をチェック
-        is_valid, follow_up = await self.validate_answer(question.question, answer)
+        # これまでの会話履歴を構築（回答済みの質問）
+        conversation_history = []
+        for answered_q in session_data.answered_questions:
+            q_text = answered_q.question
+            a_text = session_data.answers.get(answered_q.id, "")
+            conversation_history.append((q_text, a_text))
+
+        # 現在の質問に対する過去の回答があれば追加（追加質問の場合）
+        if question_id in session_data.answers:
+            previous_answer = session_data.answers[question_id]
+            # 前回の回答を履歴に追加（「以前の回答」として）
+            conversation_history.append((f"{question.question}（前回の回答）", previous_answer))
+
+        # 回答の妥当性をチェック（会話履歴を含む）
+        is_valid, follow_up = await self.validate_answer(
+            question.question, answer, conversation_history
+        )
 
         if is_valid:
-            # 回答を記録
+            # 回答を記録（前回の回答を上書き）
             session_data.answers[question_id] = answer
 
             # 回答済みの質問に移動
@@ -255,7 +290,9 @@ JSON形式のみを出力してください。
 
             return True, None
         else:
-            # 不十分な回答の場合、追加質問を返す（質問は削除しない）
+            # 不十分な回答の場合、一時的に回答を記録（次の回答時に参照できるように）
+            session_data.answers[question_id] = answer
+            # 質問は削除しない（まだ回答が完了していないため）
             return False, follow_up
 
     async def update_requirements_with_all_answers(
@@ -304,6 +341,52 @@ JSON形式のみを出力してください。
 
         return updated_requirements
 
+    async def generate_update_summary(
+        self,
+        session_data: SessionData,
+        updated_requirements: str,
+    ) -> str:
+        """
+        要件定義書の更新要点を生成
+
+        Args:
+            session_data: セッションデータ
+            updated_requirements: 更新された要件定義書
+
+        Returns:
+            update_summary: 更新要点
+        """
+        # 全ての質問と回答をまとめる
+        qa_text = ""
+        for q in session_data.answered_questions:
+            answer = session_data.answers.get(q.id, "")
+            qa_text += f"\n- {q.question}\n  回答: {answer}\n"
+
+        summary_prompt = f"""以下のユーザー回答に基づいて、要件定義書をどのように更新したかを簡潔に要約してください。
+
+【ユーザーの回答】
+{qa_text}
+
+【指示】
+- 更新した主要なポイントを3〜5個の箇条書きで記載
+- 各ポイントは1文で簡潔に
+- 「〜を明確化しました」「〜を追加しました」のような形式で
+- マークダウン形式の箇条書きで出力
+
+例：
+- システム概要として社内書籍管理システムであることを明確化しました
+- 対象ユーザーを全社員（約100名）と明記しました
+- 予算を200万円以内、納期を3ヶ月後と設定しました
+"""
+
+        update_summary = await llm_service.generate_with_system_prompt(
+            system_prompt=self.SYSTEM_PROMPT,
+            user_prompt=summary_prompt,
+            temperature=0.3,
+        )
+
+        return update_summary.strip()
+
     async def generate_next_questions(
         self,
         session_data: SessionData,
@@ -343,7 +426,7 @@ JSON形式のみを出力してください。
 【指示】
 - 既に明確になった点については質問しない
 - 要件定義書の品質を高めるための追加質問をする
-- 最大5個の質問を生成する
+- **重要度の高い質問に絞り込み、最大{settings.max_questions}個程度にする**
 - categoryは必ず "functional", "non_functional", "constraint", "other" のいずれかを使用
 - priorityは必ず "high", "medium", "low" のいずれかを使用
 - 要件が十分に明確で追加質問が不要な場合は空の配列を返す

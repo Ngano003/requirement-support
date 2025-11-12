@@ -47,6 +47,9 @@ async def initialize_breakdown(request: BreakdownInitializeRequest):
         session_manager.save_session(session_data)
         session_manager.save_requirements(session_id, draft_requirements)
 
+        # システムメッセージを生成
+        system_message = f"質問を{len(questions)}個作成しました。順に回答してください。全ての回答後、要件定義書を更新します。"
+
         return BreakdownInitializeResponse(
             session_id=session_id,
             draft_requirements=draft_requirements,
@@ -54,6 +57,7 @@ async def initialize_breakdown(request: BreakdownInitializeRequest):
             completion_rate=completion_rate,
             answered_count=0,
             total_count=len(questions),
+            system_message=system_message,
         )
 
     except Exception as e:
@@ -104,13 +108,27 @@ async def answer_question(request: BreakdownAnswerRequest):
         all_answered = len(session_data.questions) == 0
         updated_requirements = session_data.requirements
         new_questions = []
+        system_message = None
+        update_summary = None
+        next_questions_message = None
 
         if all_answered:
+            # システムメッセージ: 更新開始
+            system_message = "全ての質問に回答いただきました。要件定義書を更新します。少々お待ちください。"
+
             # 要件定義書を一括更新
             updated_requirements = await breakdown_service.update_requirements_with_all_answers(
                 session_data
             )
             session_data.requirements = updated_requirements
+
+            # 更新要点を生成
+            update_summary = await breakdown_service.generate_update_summary(
+                session_data, updated_requirements
+            )
+
+            # 要件定義書を保存
+            session_manager.save_requirements(request.session_id, updated_requirements)
 
             # 新しい質問を生成
             new_questions = await breakdown_service.generate_next_questions(
@@ -128,8 +146,11 @@ async def answer_question(request: BreakdownAnswerRequest):
             completion_rate = breakdown_service.calculate_completion_rate(session_data)
             session_data.completion_rate = completion_rate
 
-            # 要件定義書を保存
-            session_manager.save_requirements(request.session_id, updated_requirements)
+            # 次の質問についてのメッセージを生成
+            if len(new_questions) > 0:
+                next_questions_message = f"新たに質問を{len(new_questions)}個作成しました。順に回答してください。全ての回答後、再度要件定義書を更新します。"
+            else:
+                next_questions_message = "追加の質問はありません。要件定義が完了しました。"
 
         # セッションを保存
         session_manager.save_session(session_data)
@@ -147,6 +168,9 @@ async def answer_question(request: BreakdownAnswerRequest):
             total_count=total_questions,
             follow_up_question=None,
             answer_accepted=True,
+            system_message=system_message,
+            update_summary=update_summary,
+            next_questions_message=next_questions_message,
         )
 
     except HTTPException:

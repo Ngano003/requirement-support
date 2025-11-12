@@ -32,6 +32,7 @@ class BreakdownInitializeResponse(BaseModel):
     completion_rate: float = Field(..., description="要件の充足率（0-100）")
     answered_count: int = Field(default=0, description="回答済みの質問数")
     total_count: int = Field(..., description="総質問数")
+    system_message: Optional[str] = Field(None, description="システムメッセージ")
 
 
 class BreakdownAnswerRequest(BaseModel):
@@ -51,6 +52,9 @@ class BreakdownAnswerResponse(BaseModel):
     total_count: int = Field(..., description="現在のラウンドの総質問数")
     follow_up_question: Optional[str] = Field(None, description="回答が不十分な場合の追加質問")
     answer_accepted: bool = Field(..., description="回答が受け入れられたかどうか")
+    system_message: Optional[str] = Field(None, description="システムメッセージ（更新開始）")
+    update_summary: Optional[str] = Field(None, description="要件定義書更新の要点")
+    next_questions_message: Optional[str] = Field(None, description="次の質問についてのメッセージ")
 
 
 class BreakdownStatusResponse(BaseModel):
