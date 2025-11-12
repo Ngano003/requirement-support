@@ -30,6 +30,8 @@ class BreakdownInitializeResponse(BaseModel):
     draft_requirements: str = Field(..., description="要件定義書のたたき台（マークダウン形式）")
     questions: List[Question] = Field(..., description="生成された質問リスト")
     completion_rate: float = Field(..., description="要件の充足率（0-100）")
+    answered_count: int = Field(default=0, description="回答済みの質問数")
+    total_count: int = Field(..., description="総質問数")
 
 
 class BreakdownAnswerRequest(BaseModel):
@@ -44,6 +46,11 @@ class BreakdownAnswerResponse(BaseModel):
     updated_requirements: str = Field(..., description="更新された要件定義書")
     new_questions: List[Question] = Field(..., description="新たに生成された質問")
     completion_rate: float = Field(..., description="要件の充足率（0-100）")
+    all_answered: bool = Field(..., description="全質問に回答済みかどうか")
+    answered_count: int = Field(..., description="現在のラウンドで回答済みの質問数")
+    total_count: int = Field(..., description="現在のラウンドの総質問数")
+    follow_up_question: Optional[str] = Field(None, description="回答が不十分な場合の追加質問")
+    answer_accepted: bool = Field(..., description="回答が受け入れられたかどうか")
 
 
 class BreakdownStatusResponse(BaseModel):

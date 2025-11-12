@@ -5,7 +5,7 @@ import { Question } from "@/lib/api";
 import { Send, CheckCircle } from "lucide-react";
 
 interface Message {
-  type: "question" | "answer" | "system";
+  type: "question" | "answer" | "system" | "follow_up";
   content: string;
   question?: Question;
 }
@@ -16,6 +16,10 @@ interface ChatInterfaceProps {
   isLoading: boolean;
   completionRate: number;
   isRestoredSession?: boolean;
+  answeredCount?: number;
+  totalCount?: number;
+  isUpdating?: boolean;
+  followUpQuestion?: string | null;
 }
 
 export default function ChatInterface({
@@ -24,6 +28,10 @@ export default function ChatInterface({
   isLoading,
   completionRate,
   isRestoredSession = false,
+  answeredCount = 0,
+  totalCount = 0,
+  isUpdating = false,
+  followUpQuestion = null,
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentAnswer, setCurrentAnswer] = useState("");
@@ -68,6 +76,19 @@ export default function ChatInterface({
     // displayedQuestionIdsを依存配列から除外して無限ループを防ぐ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questions, isInitialized]);
+
+  // 追加質問を表示
+  useEffect(() => {
+    if (followUpQuestion) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "follow_up",
+          content: followUpQuestion,
+        },
+      ]);
+    }
+  }, [followUpQuestion]);
 
   const handleSubmitAnswer = () => {
     if (!currentAnswer.trim() || isLoading) return;
@@ -125,9 +146,9 @@ export default function ChatInterface({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">AIとの対話</h2>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">進捗率:</span>
+            <span className="text-sm text-gray-600">進捗:</span>
             <span className="font-semibold text-blue-600">
-              {Math.round(completionRate)}%
+              {answeredCount} / {totalCount}
             </span>
           </div>
         </div>
@@ -138,6 +159,13 @@ export default function ChatInterface({
             style={{ width: `${completionRate}%` }}
           />
         </div>
+        {/* 更新中メッセージ */}
+        {isUpdating && (
+          <div className="mt-2 text-sm text-orange-600 font-medium flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin" />
+            要件定義書を更新中...
+          </div>
+        )}
       </div>
 
       {/* メッセージエリア */}
@@ -198,6 +226,22 @@ export default function ChatInterface({
                 <div className="bg-green-50 text-green-800 rounded-lg px-4 py-2 text-sm flex items-center gap-2">
                   <CheckCircle size={16} />
                   {message.content}
+                </div>
+              </div>
+            )}
+
+            {message.type === "follow_up" && (
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-orange-500 text-white flex items-center justify-center font-semibold">
+                  AI
+                </div>
+                <div className="flex-1">
+                  <div className="bg-orange-50 border-l-4 border-orange-500 rounded-lg p-4 shadow-sm">
+                    <div className="text-xs font-semibold text-orange-700 mb-2">
+                      回答が不十分です。もう少し詳しく教えてください
+                    </div>
+                    <p className="text-gray-800">{message.content}</p>
+                  </div>
                 </div>
               </div>
             )}

@@ -3,7 +3,7 @@
 """
 import json
 import uuid
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from app.models.schemas import Question, SessionData
 from app.services.llm_service import llm_service
 
@@ -82,15 +82,30 @@ class BreakdownService:
 【要件定義書のたたき台】
 {draft_requirements}
 
+【質問作成のルール】
+1. **1つの質問には1つの観点のみ**：複数の観点を1つの質問にまとめない
+2. **簡潔で明確**：「例:」や括弧での補足説明は最小限にする
+3. **具体的**：曖昧な表現を避け、何を知りたいのか明確にする
+4. **優先度付け**：重要な質問から順に生成する
+
 【指示】
 - 不明瞭な点や不足している情報について質問する
 - エラーハンドリング、セキュリティ、パフォーマンスなどの非機能要件も考慮
 - 各質問について以下の情報を含める：
   - id: 一意の識別子（q1, q2, ...）
   - category: 必ず次のいずれかを使用 → functional, non_functional, constraint, other
-  - question: 質問文
+  - question: 質問文（簡潔に1文で）
   - priority: 必ず次のいずれかを使用 → high, medium, low
-  - context: 質問の背景（オプション）
+  - context: 質問の背景（省略可）
+
+**悪い例**：
+「本の予約機能について、予約待ちの管理方法（優先順位、キャンセル時の扱い、有効期限）や、受け渡しフロー（通知方法、受け取り方法）の詳細を教えてください。」
+→ 複数の観点が混在している
+
+**良い例**：
+- 「予約待ちの管理方法として、複数人が予約した場合の優先順位はどのように決めますか？」
+- 「予約の有効期限はありますか？」
+- 「予約した本が返却されたとき、どのように予約者に通知しますか？」
 
 **重要**: categoryは必ず "functional", "non_functional", "constraint", "other" のいずれか、priorityは必ず "high", "medium", "low" のいずれかを使用してください。
 
@@ -124,14 +139,93 @@ JSON配列のみを出力してください。他の説明は不要です。
 
         return session_id, draft_requirements, questions
 
+    async def validate_answer(
+        self,
+        question: str,
+        answer: str,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        回答が質問に対して適切かどうかを評価
+
+        Args:
+            question: 質問文
+            answer: ユーザーの回答
+
+        Returns:
+            (is_valid, follow_up_question):
+            - is_valid: 回答が妥当ならTrue
+            - follow_up_question: 不十分な場合の追加質問（妥当な場合はNone）
+        """
+        validation_prompt = f"""以下の質問と回答を評価してください。
+
+【質問】
+{question}
+
+【回答】
+{answer}
+
+【評価基準】
+1. 回答が質問に対して直接的に答えているか
+2. 回答が具体的で実装可能な内容か
+3. 回答が曖昧でないか
+
+【指示】
+回答を評価し、以下のJSON形式で出力してください：
+
+- 回答が妥当な場合：
+```json
+{{"is_valid": true, "reason": "評価理由"}}
+```
+
+- 回答が不十分な場合（言い換えた追加質問を含める）：
+```json
+{{"is_valid": false, "reason": "不十分な理由", "follow_up": "言い換えた質問文（より具体的で答えやすく）"}}
+```
+
+**重要**：
+- 「特になし」「任せます」「わかりません」などの曖昧な回答はis_valid=false
+- 質問の観点に対して具体的な情報がない場合もis_valid=false
+- 追加質問は元の質問を言い換えて、より答えやすくする
+
+JSON形式のみを出力してください。
+"""
+
+        response_json = await llm_service.generate_with_system_prompt(
+            system_prompt=self.SYSTEM_PROMPT,
+            user_prompt=validation_prompt,
+            temperature=0.3,
+        )
+
+        # JSONをパース
+        try:
+            response_json = response_json.strip()
+            if response_json.startswith("```json"):
+                response_json = response_json[7:]
+            if response_json.startswith("```"):
+                response_json = response_json[3:]
+            if response_json.endswith("```"):
+                response_json = response_json[:-3]
+            response_json = response_json.strip()
+
+            result = json.loads(response_json)
+            is_valid = result.get("is_valid", True)
+            follow_up = result.get("follow_up", None)
+
+            return is_valid, follow_up
+
+        except Exception as e:
+            print(f"回答評価エラー: {e}")
+            # エラーの場合は妥当とみなす（フォールバック）
+            return True, None
+
     async def process_answer(
         self,
         session_data: SessionData,
         question_id: str,
         answer: str,
-    ) -> Tuple[str, List[Question]]:
+    ) -> Tuple[bool, Optional[str]]:
         """
-        質問への回答を処理し、要件定義書を更新
+        質問への回答を記録し、妥当性をチェック
 
         Args:
             session_data: セッションデータ
@@ -139,31 +233,66 @@ JSON配列のみを出力してください。他の説明は不要です。
             answer: ユーザーの回答
 
         Returns:
-            (updated_requirements, new_questions)
+            (is_valid, follow_up_question):
+            - is_valid: 回答が妥当ならTrue
+            - follow_up_question: 不十分な場合の追加質問
         """
         # 該当する質問を見つける
         question = next((q for q in session_data.questions if q.id == question_id), None)
         if not question:
             raise ValueError(f"質問ID {question_id} が見つかりません")
 
+        # 回答の妥当性をチェック
+        is_valid, follow_up = await self.validate_answer(question.question, answer)
+
+        if is_valid:
+            # 回答を記録
+            session_data.answers[question_id] = answer
+
+            # 回答済みの質問に移動
+            session_data.questions.remove(question)
+            session_data.answered_questions.append(question)
+
+            return True, None
+        else:
+            # 不十分な回答の場合、追加質問を返す（質問は削除しない）
+            return False, follow_up
+
+    async def update_requirements_with_all_answers(
+        self,
+        session_data: SessionData,
+    ) -> str:
+        """
+        全ての回答を反映して要件定義書を更新
+
+        Args:
+            session_data: セッションデータ
+
+        Returns:
+            updated_requirements: 更新された要件定義書
+        """
+        # 全ての質問と回答をまとめる
+        qa_text = ""
+        for q in session_data.answered_questions:
+            answer = session_data.answers.get(q.id, "")
+            qa_text += f"\n【質問{q.id}】\n{q.question}\n【回答】\n{answer}\n"
+
         # 要件定義書を更新
-        update_prompt = f"""以下の要件定義書を、ユーザーの回答に基づいて更新してください。
+        update_prompt = f"""以下の要件定義書を、全てのユーザー回答に基づいて更新してください。
 
 【現在の要件定義書】
 {session_data.requirements}
 
-【質問】
-{question.question}
-
-【ユーザーの回答】
-{answer}
+【全ての質問と回答】
+{qa_text}
 
 【指示】
-- ユーザーの回答を要件定義書に反映する
+- 全てのユーザー回答を要件定義書に反映する
 - 関連する「TODO」や「要確認」を具体的な内容に置き換える
 - 新しい情報を適切なセクションに追加する
 - マークダウン形式を維持する
 - 矛盾がないように注意する
+- 回答の内容を統合して、一貫性のある要件定義書にする
 
 更新された要件定義書のみを出力してください。他の説明は不要です。
 """
@@ -173,15 +302,43 @@ JSON配列のみを出力してください。他の説明は不要です。
             user_prompt=update_prompt,
         )
 
-        # 新しい質問を生成（必要に応じて）
+        return updated_requirements
+
+    async def generate_next_questions(
+        self,
+        session_data: SessionData,
+        updated_requirements: str,
+    ) -> List[Question]:
+        """
+        要件定義書更新後に新しい質問を生成
+
+        Args:
+            session_data: セッションデータ
+            updated_requirements: 更新された要件定義書
+
+        Returns:
+            new_questions: 新しい質問リスト
+        """
+        # これまでの全Q&Aをまとめる
+        qa_history = ""
+        for q in session_data.answered_questions:
+            answer = session_data.answers.get(q.id, "")
+            qa_history += f"\n質問: {q.question}\n回答: {answer}\n"
+
+        # 新しい質問を生成
         new_questions_prompt = f"""以下の要件定義書を見て、まだ明確でない点や追加で確認すべき点について質問を生成してください。
 
 【要件定義書】
 {updated_requirements}
 
-【これまでの質問と回答】
-質問: {question.question}
-回答: {answer}
+【これまでの質問と回答の履歴】
+{qa_history}
+
+【質問作成のルール】
+1. **1つの質問には1つの観点のみ**：複数の観点を1つの質問にまとめない
+2. **簡潔で明確**：「例:」や括弧での補足説明は最小限にする
+3. **具体的**：曖昧な表現を避け、何を知りたいのか明確にする
+4. **優先度付け**：重要な質問から順に生成する
 
 【指示】
 - 既に明確になった点については質問しない
@@ -189,14 +346,15 @@ JSON配列のみを出力してください。他の説明は不要です。
 - 最大5個の質問を生成する
 - categoryは必ず "functional", "non_functional", "constraint", "other" のいずれかを使用
 - priorityは必ず "high", "medium", "low" のいずれかを使用
+- 要件が十分に明確で追加質問が不要な場合は空の配列を返す
 
 JSON形式で出力してください：
 ```json
 [
   {{
-    "id": "q{len(session_data.answered_questions) + len(session_data.questions) + 1}",
+    "id": "q{len(session_data.answered_questions) + 1}",
     "category": "functional",
-    "question": "質問文",
+    "question": "質問文（簡潔に1文で）",
     "priority": "high",
     "context": "背景説明"
   }}
@@ -215,7 +373,7 @@ JSON配列のみを出力してください。他の説明は不要です。
 
         new_questions = self._parse_questions(new_questions_json)
 
-        return updated_requirements, new_questions
+        return new_questions
 
     def _parse_questions(self, json_str: str) -> List[Question]:
         """

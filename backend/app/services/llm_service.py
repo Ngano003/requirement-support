@@ -17,6 +17,10 @@ class LLMService:
         if self.provider == "google_ai":
             # Google AI Studioの場合
             import google.generativeai as genai
+            import os
+            # 環境変数を設定（SDKが自動的に読み込む）
+            if settings.api_key:
+                os.environ['GOOGLE_API_KEY'] = settings.api_key
             genai.configure(api_key=settings.api_key)
             self.google_client = genai.GenerativeModel(settings.model_name)
             self.client = None

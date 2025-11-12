@@ -25,6 +25,10 @@ export default function BreakdownPage() {
   const [inputText, setInputText] = useState<string>("");
   const [isRestoring, setIsRestoring] = useState<boolean>(true);
   const [isRestoredSession, setIsRestoredSession] = useState<boolean>(false);
+  const [answeredCount, setAnsweredCount] = useState<number>(0);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [isUpdating, setIsUpdating] = useState<boolean>(false);
+  const [followUpQuestion, setFollowUpQuestion] = useState<string | null>(null);
 
   // ページロード時にセッションを復元
   useEffect(() => {
@@ -91,6 +95,8 @@ export default function BreakdownPage() {
       setRequirements(response.draft_requirements);
       setQuestions(response.questions);
       setCompletionRate(response.completion_rate);
+      setAnsweredCount(response.answered_count);
+      setTotalCount(response.total_count);
       setStep("chat");
     } catch (error) {
       console.error("初期化エラー:", error);
@@ -111,12 +117,38 @@ export default function BreakdownPage() {
         answer: answer,
       });
 
-      setRequirements(response.updated_requirements);
-      setQuestions((prev) => [
-        ...prev.filter((q) => q.id !== questionId),
-        ...response.new_questions,
-      ]);
+      // 回答が受け入れられなかった場合（不十分な回答）
+      if (!response.answer_accepted && response.follow_up_question) {
+        // 追加質問をチャット欄に表示
+        setFollowUpQuestion(response.follow_up_question);
+        setIsLoading(false);
+        return;
+      }
+
+      // 回答が受け入れられた場合、追加質問をクリア
+      setFollowUpQuestion(null);
+
+      // 回答が受け入れられた場合、質問をローカルで削除
+      setQuestions((prev) => prev.filter((q) => q.id !== questionId));
+      setAnsweredCount((prev) => prev + 1);
+
+      // 全質問に回答した場合、要件定義書が更新される
+      if (response.all_answered) {
+        setIsUpdating(true);
+        // 要件定義書を更新
+        setRequirements(response.updated_requirements);
+        // 新しい質問を追加
+        setQuestions(response.new_questions);
+        // カウンターをリセット
+        setAnsweredCount(0);
+        setTotalCount(response.new_questions.length);
+        setIsUpdating(false);
+      }
+
       setCompletionRate(response.completion_rate);
+      // バックエンドから返ってきた値でも更新
+      setAnsweredCount(response.answered_count);
+      setTotalCount(response.total_count);
     } catch (error) {
       console.error("回答処理エラー:", error);
       alert("回答の処理に失敗しました: " + (error as Error).message);
@@ -251,6 +283,10 @@ export default function BreakdownPage() {
               isLoading={isLoading}
               completionRate={completionRate}
               isRestoredSession={isRestoredSession}
+              answeredCount={answeredCount}
+              totalCount={totalCount}
+              isUpdating={isUpdating}
+              followUpQuestion={followUpQuestion}
             />
           </div>
         </div>
