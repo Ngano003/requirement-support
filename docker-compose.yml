@@ -7,7 +7,7 @@ services:
       target: development
     container_name: requirement-support-backend
     ports:
-      - "8001:8001"
+      - "8010:8001"
     volumes:
       - ./backend:/app
       - ./data:/data
@@ -40,13 +40,13 @@ services:
       target: development
     container_name: requirement-support-frontend
     ports:
-      - "3000:3000"
+      - "3010:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8001
+      - NEXT_PUBLIC_API_URL=http://localhost:8010
     networks:
       - requirement-support-network
     depends_on:
