@@ -21,6 +21,7 @@ class SchemaMapper:
         "Function": "システムが提供する機能やユースケース",
         "Data": "管理されるデータやエンティティ",
         "Requirement": "制約、ルール、非機能要件、セキュリティ要件",
+        "Hardware": "ハードウェア、デバイス、インフラストラクチャ",
     }
 
     STANDARD_RELATIONS = {
@@ -38,6 +39,7 @@ class SchemaMapper:
             "function_mapping": [],
             "data_mapping": [],
             "requirement_mapping": [],
+            "hardware_mapping": [],
         }
 
     def create_mapping_from_candidates(
@@ -100,12 +102,25 @@ class SchemaMapper:
                 }
             )
 
+        # Hardware候補をマッピング
+        for candidate in structure_candidates.get("hardware_candidates", []):
+            self.mapping["hardware_mapping"].append(
+                {
+                    "name": candidate["name"],
+                    "description": candidate.get("description", ""),
+                    "device_type": candidate.get("device_type", "Unknown"),
+                    "label": "Hardware",
+                    "approved": True,
+                }
+            )
+
         logger.info(
             f"Mapping created:\n"
             f"  - Actors: {len(self.mapping['actor_mapping'])}\n"
             f"  - Functions: {len(self.mapping['function_mapping'])}\n"
             f"  - Data: {len(self.mapping['data_mapping'])}\n"
-            f"  - Requirements: {len(self.mapping['requirement_mapping'])}"
+            f"  - Requirements: {len(self.mapping['requirement_mapping'])}\n"
+            f"  - Hardware: {len(self.mapping['hardware_mapping'])}"
         )
 
         return self.mapping
@@ -193,6 +208,19 @@ class SchemaMapper:
                     f"（タイプ: {req.get('type', 'Functional')}）"
                 )
 
+        # Hardware抽出指示
+        approved_hardware = [
+            item for item in self.mapping.get("hardware_mapping", []) if item.get("approved", True)
+        ]
+        if approved_hardware:
+            instructions.append("\n## Hardware（ハードウェア）")
+            instructions.append("以下のハードウェアを抽出してください：")
+            for hw in approved_hardware:
+                instructions.append(
+                    f"- **{hw['name']}**: {hw.get('description', '')} "
+                    f"（種類: {hw.get('device_type', 'Unknown')}）"
+                )
+
         # 関係性抽出指示
         instructions.append("\n## 関係性（Relations）")
         instructions.append("以下の関係性を自動で推論してください：")
@@ -240,5 +268,15 @@ class SchemaMapper:
             )
         if len(self.mapping.get("requirement_mapping", [])) > 5:
             print(f"  ... 他 {len(self.mapping.get('requirement_mapping', [])) - 5}件")
+
+        print(f"\n【Hardware】 {len(self.mapping.get('hardware_mapping', []))}件")
+        for item in self.mapping.get("hardware_mapping", [])[:5]:
+            status = "✅" if item.get("approved", True) else "❌"
+            print(
+                f"  {status} {item['name']}: {item.get('description', '')} "
+                f"[{item.get('device_type', 'Unknown')}]"
+            )
+        if len(self.mapping.get("hardware_mapping", [])) > 5:
+            print(f"  ... 他 {len(self.mapping.get('hardware_mapping', [])) - 5}件")
 
         print("\n" + "=" * 80)

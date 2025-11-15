@@ -96,6 +96,21 @@ ENTITY_TYPES = [
             "仕様",
         ]
     ),
+    EntityType(
+        name="Hardware",
+        description="物理的なデバイス、サーバー、インフラストラクチャ、IoTデバイス",
+        required_properties=["name"],
+        optional_properties=["description", "device_type", "kind"],
+        extraction_patterns=[
+            "〜サーバー",
+            "〜デバイス",
+            "〜リーダー",
+            "PC",
+            "スマートフォン",
+            "ハードウェア",
+            "インフラ",
+        ]
+    ),
 ]
 
 RELATION_TYPES = [

@@ -362,6 +362,21 @@ class EntityExtractor:
                     f"（タイプ: {req.get('type', 'Functional')}）\n"
                 )
 
+        # Hardware
+        approved_hardware = [
+            item
+            for item in self.schema_mapping.get("hardware_mapping", [])
+            if item.get("approved", True)
+        ]
+        if approved_hardware:
+            prompt_parts.append("\n### Hardware（ハードウェア）\n")
+            prompt_parts.append("以下のハードウェアを抽出してください：\n")
+            for hw in approved_hardware:
+                prompt_parts.append(
+                    f"- **{hw['name']}**: {hw.get('description', '')} "
+                    f"（種類: {hw.get('device_type', 'Unknown')}）\n"
+                )
+
         # 関係性
         prompt_parts.append("\n### 関係性（Relations）\n")
         prompt_parts.append("以下の関係性を推論してください：\n")

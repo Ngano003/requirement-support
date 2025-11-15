@@ -68,7 +68,8 @@ class StructureExtractor:
                 f"  - Actors: {len(structure.get('actor_candidates', []))}\n"
                 f"  - Functions: {len(structure.get('function_candidates', []))}\n"
                 f"  - Data: {len(structure.get('data_candidates', []))}\n"
-                f"  - Requirements: {len(structure.get('requirement_candidates', []))}"
+                f"  - Requirements: {len(structure.get('requirement_candidates', []))}\n"
+                f"  - Hardware: {len(structure.get('hardware_candidates', []))}"
             )
             return structure
         except json.JSONDecodeError as e:
@@ -80,6 +81,7 @@ class StructureExtractor:
                 "function_candidates": [],
                 "data_candidates": [],
                 "requirement_candidates": [],
+                "hardware_candidates": [],
             }
 
     def _build_extraction_prompt(self, requirements_text: str) -> str:
@@ -111,6 +113,12 @@ class StructureExtractor:
    - セキュリティ要件（例: SSL/TLS必須、個人情報の暗号化）
    - 各候補には name、description、type（Functional/NonFunctional/Security/Business）を含める
 
+5. **ハードウェア候補（hardware_candidates）**:
+   - システムで使用される物理的なデバイスやインフラストラクチャ（例: サーバー、データベースサーバー、ロードバランサー）
+   - IoTデバイスやセンサー（例: バーコードスキャナー、ICカードリーダー）
+   - ネットワーク機器（例: ルーター、スイッチ、ファイアウォール）
+   - 各候補には name、description、device_type（Server/Database/IoT/Network/Storage/Client）を含める
+
 ## 出力形式
 
 JSON形式で出力してください。JSONのみを出力し、他の説明やマークダウン記法は含めないでください。
@@ -132,6 +140,10 @@ JSON形式で出力してください。JSONのみを出力し、他の説明や
   "requirement_candidates": [
     {{"name": "パスワードポリシー", "description": "パスワードは8文字以上で英数字と記号を含む", "type": "Security"}},
     {{"name": "レスポンス時間", "description": "APIのレスポンスは1秒以内", "type": "NonFunctional"}}
+  ],
+  "hardware_candidates": [
+    {{"name": "Webサーバー", "description": "アプリケーションを実行するサーバー", "device_type": "Server"}},
+    {{"name": "データベースサーバー", "description": "PostgreSQLを実行するDBサーバー", "device_type": "Database"}}
   ]
 }}
 ```
