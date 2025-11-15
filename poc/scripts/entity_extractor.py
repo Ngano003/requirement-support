@@ -42,10 +42,11 @@ logger = logging.getLogger(__name__)
 class EntityExtractor:
     """エンティティ抽出器"""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, schema_mapping: Dict[str, Any] = None):
         self.config = config
         self.entity_types = ENTITY_TYPES
         self.relation_types = RELATION_TYPES
+        self.schema_mapping = schema_mapping  # スキーママッピング（オプション）
 
         # エンティティタイプ名のセット（高速検索用）
         self.valid_entity_types: Set[str] = {et.name for et in self.entity_types}
@@ -93,13 +94,19 @@ class EntityExtractor:
             }
         """
         try:
-            # プロンプト構築
-            prompt = build_entity_extraction_prompt(requirements_text)
+            # プロンプト構築（スキーママッピングがあれば使用）
+            if self.schema_mapping:
+                logger.info("Using schema mapping for guided extraction...")
+                prompt = self._build_guided_extraction_prompt(requirements_text)
+                system_prompt = "あなたは要件定義書のエンティティ抽出の専門家です。与えられたスキーマ定義に従って、正確にエンティティと関係性を抽出してください。"
+            else:
+                prompt = build_entity_extraction_prompt(requirements_text)
+                system_prompt = ENTITY_EXTRACTION_SYSTEM_PROMPT
 
             # LLMで抽出
             logger.info("Extracting entities and relations from requirements text...")
             response = await self._call_llm(
-                system_prompt=ENTITY_EXTRACTION_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 user_prompt=prompt,
             )
 
@@ -283,3 +290,114 @@ class EntityExtractor:
             return False, f"Target entity not found: {target_id}"
 
         return True, ""
+
+    def _build_guided_extraction_prompt(self, requirements_text: str) -> str:
+        """
+        スキーママッピングを使ったガイド付き抽出プロンプトを生成
+
+        Args:
+            requirements_text: 要件定義書のテキスト
+
+        Returns:
+            ガイド付きプロンプト
+        """
+        prompt_parts = []
+
+        prompt_parts.append("以下の要件定義書から、指定されたスキーマ定義に従ってエンティティと関係性を抽出してください。\n")
+
+        # スキーマ定義セクション
+        prompt_parts.append("## スキーマ定義\n")
+
+        # Actor
+        approved_actors = [
+            item
+            for item in self.schema_mapping.get("actor_mapping", [])
+            if item.get("approved", True)
+        ]
+        if approved_actors:
+            prompt_parts.append("\n### Actor（アクター）\n")
+            prompt_parts.append("以下のアクターを抽出してください：\n")
+            for actor in approved_actors:
+                prompt_parts.append(f"- **{actor['name']}**: {actor.get('description', '')}\n")
+
+        # Function
+        approved_functions = [
+            item
+            for item in self.schema_mapping.get("function_mapping", [])
+            if item.get("approved", True)
+        ]
+        if approved_functions:
+            prompt_parts.append("\n### Function（機能）\n")
+            prompt_parts.append("以下の機能を抽出してください：\n")
+            for func in approved_functions:
+                prompt_parts.append(f"- **{func['name']}**: {func.get('description', '')}\n")
+
+        # Data
+        approved_data = [
+            item
+            for item in self.schema_mapping.get("data_mapping", [])
+            if item.get("approved", True)
+        ]
+        if approved_data:
+            prompt_parts.append("\n### Data（データ）\n")
+            prompt_parts.append("以下のデータを抽出してください：\n")
+            for data in approved_data:
+                prompt_parts.append(
+                    f"- **{data['name']}**: {data.get('description', '')} "
+                    f"（機密性: {data.get('sensitivity', 'low')}）\n"
+                )
+
+        # Requirement
+        approved_requirements = [
+            item
+            for item in self.schema_mapping.get("requirement_mapping", [])
+            if item.get("approved", True)
+        ]
+        if approved_requirements:
+            prompt_parts.append("\n### Requirement（要件）\n")
+            prompt_parts.append("以下の要件を抽出してください：\n")
+            for req in approved_requirements:
+                prompt_parts.append(
+                    f"- **{req['name']}**: {req.get('description', '')} "
+                    f"（タイプ: {req.get('type', 'Functional')}）\n"
+                )
+
+        # 関係性
+        prompt_parts.append("\n### 関係性（Relations）\n")
+        prompt_parts.append("以下の関係性を推論してください：\n")
+        prompt_parts.append("- **USES**: ActorがFunctionを使用する\n")
+        prompt_parts.append("- **MANIPULATES**: FunctionがDataを操作する（action: Read/Write/Delete）\n")
+        prompt_parts.append("- **APPLIES_TO**: RequirementがData/Functionに適用される\n")
+        prompt_parts.append("- **DEPENDS_ON**: FunctionがFunctionに依存する\n")
+        prompt_parts.append("- **AUTHORIZES**: ActorがFunctionへのアクセス権限を持つ（permission: Allow/Deny）\n")
+
+        # 出力形式
+        prompt_parts.append("\n## 出力形式\n")
+        prompt_parts.append("以下のJSON形式で出力してください。JSONのみを出力し、他の説明は含めないでください。\n\n")
+        prompt_parts.append('```json\n')
+        prompt_parts.append('{\n')
+        prompt_parts.append('  "entities": [\n')
+        prompt_parts.append('    {\n')
+        prompt_parts.append('      "id": "ACTOR-001",\n')
+        prompt_parts.append('      "type": "Actor",\n')
+        prompt_parts.append('      "properties": {"name": "管理者", "description": "..."}\n')
+        prompt_parts.append('    }\n')
+        prompt_parts.append('  ],\n')
+        prompt_parts.append('  "relations": [\n')
+        prompt_parts.append('    {\n')
+        prompt_parts.append('      "type": "USES",\n')
+        prompt_parts.append('      "source_id": "ACTOR-001",\n')
+        prompt_parts.append('      "target_id": "FUNC-001",\n')
+        prompt_parts.append('      "properties": {}\n')
+        prompt_parts.append('    }\n')
+        prompt_parts.append('  ]\n')
+        prompt_parts.append('}\n')
+        prompt_parts.append('```\n\n')
+
+        # 要件定義書
+        prompt_parts.append("## 要件定義書\n\n")
+        prompt_parts.append(requirements_text)
+        prompt_parts.append("\n\n## 出力\n")
+        prompt_parts.append("JSON形式でエンティティと関係性を出力してください：")
+
+        return "".join(prompt_parts)

@@ -32,9 +32,10 @@ load_dotenv()
 class GraphRAGPoC:
     """GraphRAG実現性検証スクリプト"""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, schema_mapping: Dict[str, Any] = None):
         self.config = config
-        self.entity_extractor = EntityExtractor(config)
+        self.schema_mapping = schema_mapping
+        self.entity_extractor = EntityExtractor(config, schema_mapping=schema_mapping)
         self.graph_builder = GraphBuilder(config)
         self.problem_detector = ProblemDetector(config)
 
@@ -295,6 +296,11 @@ async def main():
         default="google_ai",
         help="LLMプロバイダー（デフォルト: google_ai）",
     )
+    parser.add_argument(
+        "--schema-mapping",
+        type=str,
+        help="スキーママッピングJSONファイルパス（オプション）",
+    )
 
     args = parser.parse_args()
 
@@ -307,8 +313,19 @@ async def main():
 
     logger.info(f"Using LLM provider: {config.llm_provider}")
 
+    # スキーママッピングを読み込み（指定されている場合）
+    schema_mapping = None
+    if args.schema_mapping:
+        schema_mapping_path = Path(args.schema_mapping)
+        if schema_mapping_path.exists():
+            with open(schema_mapping_path, "r", encoding="utf-8") as f:
+                schema_mapping = json.load(f)
+            logger.info(f"Loaded schema mapping from: {args.schema_mapping}")
+        else:
+            logger.warning(f"Schema mapping file not found: {args.schema_mapping}")
+
     # PoCを実行
-    poc = GraphRAGPoC(config)
+    poc = GraphRAGPoC(config, schema_mapping=schema_mapping)
     result = await poc.run(args.requirements_file)
 
     # コンソールに読みやすいサマリーを表示
