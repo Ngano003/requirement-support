@@ -1,0 +1,14 @@
+# GraphRAG PoC 依存パッケージ
+
+# LLM API クライアント
+openai>=1.0.0
+google-generativeai>=0.3.0
+
+# グラフデータベース（Memgraph）
+neo4j>=5.0.0
+
+# データバリデーション
+pydantic>=2.0.0
+
+# 環境変数管理
+python-dotenv>=1.0.0
