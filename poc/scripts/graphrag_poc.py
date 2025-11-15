@@ -17,6 +17,7 @@ from config import Config
 from entity_extractor import EntityExtractor
 from graph_builder import GraphBuilder
 from problem_detector import ProblemDetector
+from analysis_reporter import AnalysisReporter
 from dotenv import load_dotenv
 
 # ログ設定
@@ -269,6 +270,13 @@ class GraphRAGPoC:
             json.dump(result, f, ensure_ascii=False, indent=2)
         logger.info(f"Saved full report to: {full_report_output}")
 
+        # マークダウン形式の分析レポートを生成・保存
+        markdown_report = AnalysisReporter.generate_markdown_report(result)
+        analysis_report_output = output_dir / "analysis_report.md"
+        with open(analysis_report_output, "w", encoding="utf-8") as f:
+            f.write(markdown_report)
+        logger.info(f"Saved analysis report to: {analysis_report_output}")
+
 
 async def main():
     """メイン関数"""
@@ -303,18 +311,8 @@ async def main():
     poc = GraphRAGPoC(config)
     result = await poc.run(args.requirements_file)
 
-    # 結果のサマリーを表示
-    print("\n" + "=" * 80)
-    print("RESULTS SUMMARY")
-    print("=" * 80)
-    print(f"Total Issues Found: {result['summary']['total_issues']}")
-    print(f"  - Missing Items: {result['summary']['missing_items_count']}")
-    print(f"  - Contradictions: {result['summary']['contradictions_count']}")
-    print(f"\nProcessing Time: {result['performance']['total_time_seconds']}s")
-    print(f"  - Extraction: {result['performance']['extraction_time_seconds']}s")
-    print(f"  - Graph Building: {result['performance']['build_time_seconds']}s")
-    print(f"  - Problem Detection: {result['performance']['detection_time_seconds']}s")
-    print("=" * 80)
+    # コンソールに読みやすいサマリーを表示
+    AnalysisReporter.print_console_summary(result)
 
 
 if __name__ == "__main__":

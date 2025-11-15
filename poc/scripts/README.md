@@ -175,7 +175,24 @@ Processing Time: 3.65s
 - `extracted_entities.json` - 抽出されたエンティティの統計
 - `detection_results.json` - 検出された問題の詳細
 - `performance_metrics.json` - パフォーマンス測定結果
-- `full_report.json` - 統合レポート
+- `full_report.json` - 統合レポート（JSON形式）
+- `analysis_report.md` - **人間が読みやすい分析レポート（マークダウン形式）** ✨新機能
+
+#### analysis_report.md（新機能）
+
+マークダウン形式で読みやすく整形された分析レポートが自動生成されます。以下の内容が含まれます：
+
+- **分析サマリー**: 検出された問題の総数と内訳
+- **問題の詳細**: ヌケモレと矛盾の具体的な内容、影響、推奨対処法
+- **グラフ統計**: ノード数、エッジ数、ノードタイプの内訳
+- **パフォーマンス**: 各処理ステップの実行時間
+- **推奨アクション**: 優先的に対処すべき問題のリスト
+
+既存のレポートから生成する場合：
+
+```bash
+python3 generate_analysis_report.py output/full_report.json
+```
 
 #### detection_results.json の例
 
