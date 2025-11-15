@@ -95,6 +95,123 @@ class ReviewResponse(BaseModel):
     summary: str = Field(..., description="レビュー結果のサマリー")
 
 
+# ========== 強化版レビュー機能のスキーマ ==========
+
+class MissingSection(BaseModel):
+    """欠落しているセクション"""
+    section: str = Field(..., description="セクション名")
+    severity: Literal["high", "medium", "low"] = Field(..., description="重大度")
+    description: str = Field(..., description="説明")
+    suggestion: str = Field(..., description="具体的な追加提案")
+
+
+class MissingFunctionalItem(BaseModel):
+    """機能要件の記載不足"""
+    function_name: str = Field(..., description="機能名")
+    missing_items: List[str] = Field(..., description="不足している項目リスト")
+    severity: Literal["high", "medium", "low"] = Field(..., description="重大度")
+    suggestion: str = Field(..., description="具体的な追加提案")
+
+
+class MissingNonFunctionalCategory(BaseModel):
+    """非機能要件の欠落カテゴリ"""
+    category: str = Field(..., description="カテゴリ名")
+    severity: Literal["high", "medium", "low"] = Field(..., description="重大度")
+    description: str = Field(..., description="説明")
+    suggestion: str = Field(..., description="具体的な追加提案")
+
+
+class ImplicitMissingItem(BaseModel):
+    """暗黙的な抜け漏れ"""
+    item: str = Field(..., description="欠落項目")
+    reason: str = Field(..., description="なぜ必要と推測されるか")
+    severity: Literal["high", "medium", "low"] = Field(..., description="重大度")
+    suggestion: str = Field(..., description="具体的な追加提案")
+
+
+class MissingItemsResult(BaseModel):
+    """抜け漏れ検出の結果"""
+    missing_sections: List[MissingSection] = Field(default_factory=list, description="欠落セクション")
+    missing_functional_items: List[MissingFunctionalItem] = Field(
+        default_factory=list, description="機能要件の記載不足"
+    )
+    missing_non_functional_categories: List[MissingNonFunctionalCategory] = Field(
+        default_factory=list, description="非機能要件の欠落カテゴリ"
+    )
+    implicit_missing: List[ImplicitMissingItem] = Field(
+        default_factory=list, description="暗黙的な抜け漏れ"
+    )
+
+
+class Evidence(BaseModel):
+    """矛盾の証拠"""
+    section1_statement: str = Field(..., description="セクション1での記述")
+    section2_statement: str = Field(..., description="セクション2での記述")
+
+
+class CrossSectionContradiction(BaseModel):
+    """セクション間の矛盾"""
+    type: Literal["section_mismatch", "user_mismatch", "constraint_violation"] = Field(
+        ..., description="矛盾のタイプ"
+    )
+    sections: List[str] = Field(..., description="矛盾が発生しているセクション")
+    description: str = Field(..., description="矛盾の具体的な内容")
+    evidence: Evidence = Field(..., description="矛盾の証拠")
+    severity: Literal["high", "medium", "low"] = Field(..., description="重大度")
+    suggestion: str = Field(..., description="矛盾を解消するための提案")
+
+
+class TerminologyInconsistency(BaseModel):
+    """用語の不統一"""
+    concept: str = Field(..., description="概念名")
+    variations: List[str] = Field(..., description="使用されている用語のバリエーション")
+    locations: List[str] = Field(..., description="使用箇所（セクション名）")
+    severity: Literal["medium", "low"] = Field(..., description="重大度")
+    recommended_term: str = Field(..., description="推奨する統一用語")
+
+
+class LogicalContradiction(BaseModel):
+    """論理的矛盾"""
+    contradiction_type: Literal["mutual_exclusive", "constraint_conflict", "data_conflict"] = Field(
+        ..., description="矛盾のタイプ"
+    )
+    requirements: List[str] = Field(..., description="矛盾している要件")
+    description: str = Field(..., description="矛盾の内容")
+    severity: Literal["high", "medium"] = Field(..., description="重大度")
+    suggestion: str = Field(..., description="解決方法")
+
+
+class ContradictionsResult(BaseModel):
+    """矛盾・不整合検出の結果"""
+    cross_section_contradictions: List[CrossSectionContradiction] = Field(
+        default_factory=list, description="セクション間の矛盾"
+    )
+    terminology_inconsistencies: List[TerminologyInconsistency] = Field(
+        default_factory=list, description="用語の不統一"
+    )
+    logical_contradictions: List[LogicalContradiction] = Field(
+        default_factory=list, description="論理的矛盾"
+    )
+
+
+class EnhancedReviewSummary(BaseModel):
+    """統合レビューサマリー"""
+    total_missing_items: int = Field(..., description="抜け漏れの総数")
+    total_contradictions: int = Field(..., description="矛盾の総数")
+    high_severity_count: int = Field(..., description="重大度Highの総数")
+    medium_severity_count: int = Field(..., description="重大度Mediumの総数")
+    low_severity_count: int = Field(..., description="重大度Lowの総数")
+    overall_assessment: str = Field(..., description="全体評価")
+
+
+class EnhancedReviewResponse(BaseModel):
+    """強化版レビューレスポンス"""
+    review_id: str = Field(..., description="レビューID")
+    missing_items: MissingItemsResult = Field(..., description="抜け漏れ検出結果")
+    contradictions: ContradictionsResult = Field(..., description="矛盾検出結果")
+    summary: EnhancedReviewSummary = Field(..., description="統合サマリー")
+
+
 # ========== 内部データモデル ==========
 
 class SessionData(BaseModel):
