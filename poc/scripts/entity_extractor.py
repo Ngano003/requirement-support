@@ -434,6 +434,11 @@ class EntityExtractor:
 
         prompt_parts.append("以下の要件定義書から、指定されたスキーマ定義に従ってエンティティと関係性を抽出してください。\n")
 
+        prompt_parts.append("## 抽出ルール\n")
+        prompt_parts.append("1. **IDの正規化 (最重要):** JSONの`id`フィールドには、必ず「スキーマ定義」セクションに記載されている**「名前（`name`）」**（例: 「暗証番号解錠」、「ドアロックモーター」）を**そのまま**使用してください。\n")
+        prompt_parts.append("2. **エイリアス（別名）の解決:** テキスト中に `(FUNC-001)` や `(HW-001)` のようなコードを見つけた場合、それは「スキーマ定義」セクションにある「名前」のエイリアスです。それらを**「名前」に解決**し、`id`には「名前」を使ってください。\n")
+        prompt_parts.append("3. **プロパティの完全性:** `properties`オブジェクトには、`name`と`description`に加え、スキーマ定義（`（` `）`内）に示されている`category`, `sensitivity`, `device_type`などの**必須プロパティ**を必ず含めてください。\n")
+
         # スキーマ定義セクション
         prompt_parts.append("## スキーマ定義\n")
 
