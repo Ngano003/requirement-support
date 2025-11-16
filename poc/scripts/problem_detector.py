@@ -408,18 +408,6 @@ class ProblemDetector:
     async def _detect_circular_dependencies(self, session_id: str) -> List[Dict]:
         """循環依存を検出"""
         async with self.driver.session() as session:
-            
-            # --- 変更前 (エラー) ---
-            # query = """
-            #     MATCH path = (f1:Function {session_id: $session_id})-[:DEPENDS_ON*]->(f1)
-            #     RETURN f1.name AS function_name,
-            #            [n IN nodes(path) | n.name] AS cycle_path,
-            #            f1.entity_id AS entity_id
-            # """
-            
-            # --- 変更後 (修正) ---
-            # Memgraphがリスト内包表記をサポートしていないため、
-            # ノードのリスト(nodes(path))を返し、Python側で処理する
             query = """
                 MATCH path = (f1:Function {session_id: $session_id})-[:DEPENDS_ON*]->(f1)
                 RETURN f1.name AS function_name,
@@ -429,18 +417,6 @@ class ProblemDetector:
 
             result = await session.run(query, session_id=session_id)
 
-            # --- 変更前 ---
-            # return [
-            #     {
-            #         "function_name": record["function_name"],
-            #         "cycle_path": record["cycle_path"],
-            #         "entity_id": record["entity_id"],
-            #     }
-            #     async for record in result
-            # ]
-
-            # --- 変更後 (修正) ---
-            # Python側でノードのリスト(cycle_nodes)から名前のリスト(cycle_path)を生成
             return [
                 {
                     "function_name": record["function_name"],
@@ -463,7 +439,7 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-
+            print(f"_detect_permission_conflicts result:{result}")
             return [
                 {
                     "actor_name": record["actor_name"],
@@ -478,19 +454,6 @@ class ProblemDetector:
     async def _detect_data_access_conflicts(self, session_id: str) -> List[Dict]:
         """データアクセスの矛盾を検出"""
         async with self.driver.session() as session:
-            # --- 変更前 (エラーの可能性あり) ---
-            # query = """
-            #     MATCH (f1:Function {session_id: $session_id})-[m1:MANIPULATES {action: 'Write'}]->(d:Data {session_id: $session_id}),
-            #           (f2:Function {session_id: $session_id})-[m2:MANIPULATES {action: 'Write'}]->(d)
-            #     WHERE f1.name <> f2.name
-            #     AND NOT EXISTS ((f1)-[:DEPENDS_ON]->(f2))
-            #     AND NOT EXISTS ((f2)-[:DEPENDS_ON]->(f1))
-            #     RETURN ...
-            # """
-            
-            # --- 変更後 (修正) ---
-            # 競合する書き込みを検出し、OPTIONAL MATCHで依存関係をチェック
-            # f1.name < f2.name 条件で重複ペアを除外
             query = """
                 MATCH (f1:Function {session_id: $session_id})-[m1:MANIPULATES {action: 'Write'}]->(d:Data {session_id: $session_id}),
                       (f2:Function {session_id: $session_id})-[m2:MANIPULATES {action: 'Write'}]->(d)
@@ -511,7 +474,7 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-
+            print(f"_detect_data_access_conflicts result:{result}")
             conflicts = [
                 {
                     "data_name": record["data_name"],
@@ -551,6 +514,7 @@ class ProblemDetector:
                        COLLECT(DISTINCT req.name) AS security_requirements
             """
             data_result = await session.run(query=data_query, session_id=session_id, data_id=data_id)
+            print(f"_get_conflict_context result:{data_query}")
             data_record = await data_result.single()
 
             # 機能1の詳細情報を取得
@@ -606,7 +570,6 @@ class ProblemDetector:
                 MATCH path = (a:Actor {session_id: $session_id})-[:USES]->(f:Function {session_id: $session_id})-[:CONTROLS]->(h:Hardware {session_id: $session_id})
 
                 MATCH (c:Constraint {session_id: $session_id})-[:APPLIES_TO]->(h)
-                WHERE c.name CONTAINS 'のみ' OR c.name CONTAINS 'only'
 
                 OPTIONAL MATCH (c)-[:APPLIES_TO]->(allowed_actor:Actor {session_id: $session_id})
 
@@ -627,7 +590,7 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-
+            print(f"_detect_actor_hardware_conflicts result:{result}")
             conflicts = []
 
             async for record in result:
@@ -659,7 +622,8 @@ class ProblemDetector:
 
                 # LLMに判定を依頼
                 judgment = await self._llm_judge_contradiction(prompt)
-
+                print(f"judgement: {judgment}")
+                
                 # 矛盾と判定された場合のみ結果に追加
                 if judgment["is_contradiction"]:
                     conflicts.append({
@@ -694,7 +658,6 @@ class ProblemDetector:
                 MATCH path = (a:Actor {session_id: $session_id})-[:USES]->(f:Function {session_id: $session_id})-[m:MANIPULATES]->(d:Data {session_id: $session_id})
 
                 MATCH (c:Constraint {session_id: $session_id})-[:APPLIES_TO]->(d)
-                WHERE c.name CONTAINS 'のみ' OR c.name CONTAINS 'only'
 
                 OPTIONAL MATCH (c)-[:APPLIES_TO]->(allowed_actor:Actor {session_id: $session_id})
 
@@ -716,7 +679,7 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-
+            print(f"_detect_actor_data_conflicts result:{result}")
             conflicts = []
 
             async for record in result:
@@ -748,7 +711,8 @@ class ProblemDetector:
 
                 # LLMに判定を依頼
                 judgment = await self._llm_judge_contradiction(prompt)
-
+                print(f"judgement: {judgment}")
+                
                 # 矛盾と判定された場合のみ結果に追加
                 if judgment["is_contradiction"]:
                     conflicts.append({
