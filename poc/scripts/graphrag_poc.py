@@ -130,7 +130,7 @@ class GraphRAGPoC:
             logger.info(f"\nTotal time: {overall_time:.2f}s")
 
             # 結果をファイルに保存
-            self._save_results(result)
+            await self._save_results(result)
 
             logger.info("\n" + "=" * 80)
             logger.info("GraphRAG PoC Completed Successfully")
@@ -190,6 +190,8 @@ class GraphRAGPoC:
             "circular_dependencies": len(contradictions["circular_dependencies"]),
             "permission_conflicts": len(contradictions["permission_conflicts"]),
             "data_access_conflicts": len(contradictions["data_access_conflicts"]),
+            "actor_hardware_conflicts": len(contradictions.get("actor_hardware_conflicts", [])),
+            "actor_data_conflicts": len(contradictions.get("actor_data_conflicts", [])),
         }
 
         # 総合評価
@@ -227,7 +229,7 @@ class GraphRAGPoC:
             },
         }
 
-    def _save_results(self, result: Dict[str, Any]):
+    async def _save_results(self, result: Dict[str, Any]):
         """結果をファイルに保存"""
         output_dir = Path(__file__).parent / "output"
         output_dir.mkdir(exist_ok=True)
@@ -275,8 +277,9 @@ class GraphRAGPoC:
             json.dump(result, f, ensure_ascii=False, indent=2)
         logger.info(f"Saved full report to: {full_report_output}")
 
-        # マークダウン形式の分析レポートを生成・保存
-        markdown_report = AnalysisReporter.generate_markdown_report(result)
+        # マークダウン形式の分析レポートを生成・保存（LLMを使用）
+        reporter = AnalysisReporter(self.config)
+        markdown_report = await reporter.generate_markdown_report(result)
         analysis_report_output = output_dir / "analysis_report.md"
         with open(analysis_report_output, "w", encoding="utf-8") as f:
             f.write(markdown_report)

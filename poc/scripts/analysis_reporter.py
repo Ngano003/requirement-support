@@ -6,13 +6,43 @@
 
 from typing import Dict, Any, List
 from datetime import datetime
+import json
+
+from config import Config
 
 
 class AnalysisReporter:
     """分析レポート生成器"""
 
-    @staticmethod
-    def generate_markdown_report(result: Dict[str, Any]) -> str:
+    def __init__(self, config: Config = None):
+        """
+        Args:
+            config: LLM設定（Noneの場合はLLMを使わない従来のレポート生成）
+        """
+        self.config = config
+        self.llm_client = None
+        self.google_model = None
+
+        if config:
+            # LLMクライアント初期化
+            llm_config = config.get_llm_client_config()
+            self.llm_provider = config.llm_provider
+            self.model = llm_config["model"]
+
+            # プロバイダーに応じてクライアントを初期化
+            if llm_config.get("provider") == "google_ai":
+                import google.generativeai as genai
+                genai.configure(api_key=llm_config["api_key"])
+                self.google_model = genai.GenerativeModel(self.model)
+            else:
+                # OpenAI互換API（OpenAI、OpenRouter、vLLM）
+                from openai import AsyncOpenAI
+                self.llm_client = AsyncOpenAI(
+                    api_key=llm_config["api_key"],
+                    base_url=llm_config.get("base_url"),
+                )
+
+    async def generate_markdown_report(self, result: Dict[str, Any]) -> str:
         """
         マークダウン形式のレポートを生成
 
@@ -37,7 +67,12 @@ class AnalysisReporter:
         lines.extend(AnalysisReporter._generate_summary(result))
 
         # 検出された問題の詳細
-        lines.extend(AnalysisReporter._generate_issues_details(result))
+        if self.config:
+            # LLMを使った詳細レポート生成
+            lines.extend(await self._generate_issues_details_with_llm(result))
+        else:
+            # 従来の静的レポート生成
+            lines.extend(AnalysisReporter._generate_issues_details(result))
 
         # グラフ統計
         lines.extend(AnalysisReporter._generate_graph_stats(result))
@@ -94,6 +129,169 @@ class AnalysisReporter:
         lines.append("")
         lines.append("---")
         lines.append("")
+        return lines
+
+    async def _call_llm(self, prompt: str) -> str:
+        """LLMを呼び出してレスポンスを取得"""
+        if self.google_model:
+            # Google AI Studio (Gemini)
+            response = self.google_model.generate_content(prompt)
+            return response.text
+        else:
+            # OpenAI互換API
+            response = await self.llm_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.5,  # レポート生成は適度な創造性を許容
+            )
+            return response.choices[0].message.content
+
+    async def _generate_issues_details_with_llm(self, result: Dict[str, Any]) -> List[str]:
+        """LLMを使って問題の詳細セクションを生成"""
+        lines = []
+        detection = result["detection"]
+
+        lines.append("## 🔍 検出された問題の詳細")
+        lines.append("")
+
+        # ヌケモレ（従来通り静的生成）
+        lines.extend(AnalysisReporter._generate_missing_items_section(detection["missing_items"]))
+
+        # 矛盾（LLMを使って深い考察を生成）
+        lines.extend(await self._generate_contradictions_section_with_llm(detection["contradictions"]))
+
+        return lines
+
+    async def _generate_contradictions_section_with_llm(self, contradictions: Dict[str, Any]) -> List[str]:
+        """LLMを使って矛盾セクションを生成"""
+        lines = []
+        summary = contradictions["summary"]
+        details = contradictions["details"]
+
+        lines.append("### 🔴 矛盾")
+        lines.append("")
+
+        total_contradictions = sum(summary.values())
+        if total_contradictions == 0:
+            lines.append("✅ 矛盾は検出されませんでした。")
+            lines.append("")
+        else:
+            # 各矛盾タイプについてLLMで深い考察を生成
+
+            # Actor→Hardware矛盾
+            if summary.get("actor_hardware_conflicts", 0) > 0:
+                lines.append(f"#### Actor→Hardware間接制御の矛盾（{summary['actor_hardware_conflicts']}件）")
+                lines.append("")
+
+                for idx, item in enumerate(details["actor_hardware_conflicts"], 1):
+                    # LLMに深い考察を依頼
+                    prompt = f"""以下のActor→Hardware間接制御の矛盾について、詳細な分析レポートを作成してください。
+
+【検出された矛盾】
+- アクセスパス: {' → '.join(item['access_path'])}
+- 制約: {item['constraint_name']} ({item.get('constraint_category', 'カテゴリ不明')})
+- 制約内容: "{item['constraint_description']}"
+- 許可されているアクター: {', '.join(item.get('allowed_actors', [])) if item.get('allowed_actors') else '明示的な許可なし'}
+
+【LLMによる矛盾判定理由】
+{item.get('llm_reasoning', '理由なし')}
+
+【推奨対処】
+{item.get('recommended_action', '対処方法なし')}
+
+以下の形式でマークダウンレポートを作成してください：
+1. **矛盾の概要**（50-100文字で簡潔に）
+2. **詳細な分析**（矛盾の本質、なぜ問題なのか、影響範囲）
+3. **具体的な対処方法**（優先度順に箇条書き、各項目50文字程度）
+4. **考慮すべき点**（実装時の注意事項）
+
+注意：マークダウン形式で出力してください（見出しは####から開始）。"""
+
+                    llm_analysis = await self._call_llm(prompt)
+                    lines.append(llm_analysis)
+                    lines.append("")
+
+            # Actor→Data矛盾
+            if summary.get("actor_data_conflicts", 0) > 0:
+                lines.append(f"#### Actor→Data間接アクセスの矛盾（{summary['actor_data_conflicts']}件）")
+                lines.append("")
+
+                for idx, item in enumerate(details["actor_data_conflicts"], 1):
+                    # LLMに深い考察を依頼
+                    prompt = f"""以下のActor→Data間接アクセスの矛盾について、詳細な分析レポートを作成してください。
+
+【検出された矛盾】
+- アクセスパス: {' → '.join(item['access_path'])}
+- アクセス種別: {item.get('access_action', '不明')}
+- 制約: {item['constraint_name']} ({item.get('constraint_category', 'カテゴリ不明')})
+- 制約内容: "{item['constraint_description']}"
+- 許可されているアクター: {', '.join(item.get('allowed_actors', [])) if item.get('allowed_actors') else '明示的な許可なし'}
+
+【LLMによる矛盾判定理由】
+{item.get('llm_reasoning', '理由なし')}
+
+【推奨対処】
+{item.get('recommended_action', '対処方法なし')}
+
+以下の形式でマークダウンレポートを作成してください：
+1. **矛盾の概要**（50-100文字で簡潔に）
+2. **詳細な分析**（矛盾の本質、なぜ問題なのか、セキュリティへの影響）
+3. **具体的な対処方法**（優先度順に箇条書き、各項目50文字程度）
+4. **考慮すべき点**（実装時の注意事項）
+
+注意：マークダウン形式で出力してください（見出しは####から開始）。"""
+
+                    llm_analysis = await self._call_llm(prompt)
+                    lines.append(llm_analysis)
+                    lines.append("")
+
+            # その他の矛盾（従来通り静的生成）
+            if summary.get("circular_dependencies", 0) > 0 or summary.get("permission_conflicts", 0) > 0 or summary.get("data_access_conflicts", 0) > 0:
+                # 既存の矛盾タイプは静的生成を使用
+                lines.extend(AnalysisReporter._generate_contradictions_section_static(contradictions))
+
+        lines.append("---")
+        lines.append("")
+        return lines
+
+    @staticmethod
+    def _generate_contradictions_section_static(contradictions: Dict[str, Any]) -> List[str]:
+        """従来の静的な矛盾セクション生成（既存のコードから移行）"""
+        lines = []
+        summary = contradictions["summary"]
+        details = contradictions["details"]
+
+        # 1. 循環依存
+        if summary.get("circular_dependencies", 0) > 0:
+            lines.append(f"#### 循環依存（{summary['circular_dependencies']}件）")
+            lines.append("")
+            lines.append("以下の機能間で循環依存が発生しています：")
+            lines.append("")
+            for item in details["circular_dependencies"]:
+                lines.append(f"- **{item['function_name']}** (`{item['entity_id']}`)")
+                cycle = " → ".join(item['cycle_path'])
+                lines.append(f"  - 循環パス: {cycle}")
+            lines.append("")
+            lines.append("**影響**: 実装順序が決められず、デッドロックの原因になります。")
+            lines.append("")
+
+        # 2. 権限の競合
+        if summary.get("permission_conflicts", 0) > 0:
+            lines.append(f"#### 権限の競合（{summary['permission_conflicts']}件）")
+            lines.append("")
+            lines.append("以下のアクターと機能の組み合わせで権限が競合しています：")
+            lines.append("")
+            for item in details["permission_conflicts"]:
+                lines.append(f"- **{item['actor_name']}** → **{item['function_name']}**")
+                lines.append(f"  - アクター: `{item['actor_id']}`")
+                lines.append(f"  - 機能: `{item['function_id']}`")
+                lines.append(f"  - 問題: {item['conflict_type']}")
+            lines.append("")
+            lines.append("**影響**: 同じアクターが同じ機能に対してAllowとDenyの両方を持っています。")
+            lines.append("")
+
         return lines
 
     @staticmethod

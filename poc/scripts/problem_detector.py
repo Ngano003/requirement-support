@@ -70,7 +70,7 @@ class ProblemDetector:
         LLMを使って矛盾候補が本当に矛盾しているか判定
 
         Args:
-            prompt: 判定用プロンプト
+            prompt: 判定用プロンプト（JSON形式指定を含む）
 
         Returns:
             {
@@ -80,7 +80,6 @@ class ProblemDetector:
             }
         """
         try:
-            print(f"prompt:{prompt}")
             if self.google_model:
                 # Google AI Studio (Gemini)
                 response = self.google_model.generate_content(prompt)
@@ -96,40 +95,52 @@ class ProblemDetector:
                 )
                 response_text = response.choices[0].message.content
 
-            # レスポンスをパース
-            # 期待形式: "回答 (YES/NO/UNCLEAR): 理由: 推奨対処:"
-            print(f"response:{response_text}")
-            lines = response_text.strip().split('\n')
-            is_contradiction = False
-            reasoning = ""
-            recommended_action = ""
+            # JSONを抽出（```json ... ``` や { ... } の形式に対応）
+            import json
+            import re
 
-            for line in lines:
-                if line.startswith("回答") or line.startswith("答え") or line.startswith("判定"):
-                    # YES/NO/UNCLEARを抽出
-                    if "YES" in line.upper() or "はい" in line or "矛盾" in line:
-                        is_contradiction = True
-                elif line.startswith("理由"):
-                    reasoning = line.split(":", 1)[1].strip() if ":" in line else line
-                elif line.startswith("推奨対処") or line.startswith("対処"):
-                    recommended_action = line.split(":", 1)[1].strip() if ":" in line else line
+            # JSONブロックを探す（```json ... ``` 形式）
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 直接JSONオブジェクトを探す（{ ... } 形式）
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
                 else:
-                    # マルチライン対応
-                    if reasoning and not recommended_action:
-                        reasoning += " " + line
-                    elif recommended_action:
-                        recommended_action += " " + line
+                    # JSONが見つからない場合はエラー
+                    logger.warning(f"JSON not found in LLM response: {response_text[:200]}")
+                    return {
+                        "is_contradiction": True,
+                        "reasoning": f"JSON解析失敗: {response_text[:500]}",
+                        "recommended_action": "手動確認が必要"
+                    }
 
-            # 理由が取得できなかった場合は全文を理由とする
-            if not reasoning:
-                reasoning = response_text
+            # JSONをパース
+            result = json.loads(json_str)
+
+            # 期待されるフィールドを取得
+            answer = result.get("answer", result.get("回答", "UNCLEAR")).upper()
+            is_contradiction = answer == "YES" or answer == "はい" or "YES" in answer
+
+            reasoning = result.get("reasoning", result.get("理由", "理由不明"))
+            recommended_action = result.get("recommended_action", result.get("推奨対処", ""))
 
             return {
                 "is_contradiction": is_contradiction,
-                "reasoning": reasoning.strip(),
-                "recommended_action": recommended_action.strip()
+                "reasoning": reasoning,
+                "recommended_action": recommended_action
             }
 
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode failed: {e}, response: {response_text[:500]}")
+            # JSON解析失敗時は安全側（矛盾と判定）
+            return {
+                "is_contradiction": True,
+                "reasoning": f"JSON解析エラー: {str(e)}, レスポンス: {response_text[:500]}",
+                "recommended_action": "手動確認が必要"
+            }
         except Exception as e:
             logger.error(f"LLM judgment failed: {e}")
             # エラー時は安全側（矛盾と判定）
@@ -439,7 +450,6 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-            print(f"_detect_permission_conflicts result:{result}")
             return [
                 {
                     "actor_name": record["actor_name"],
@@ -474,7 +484,6 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-            print(f"_detect_data_access_conflicts result:{result}")
             conflicts = [
                 {
                     "data_name": record["data_name"],
@@ -514,7 +523,6 @@ class ProblemDetector:
                        COLLECT(DISTINCT req.name) AS security_requirements
             """
             data_result = await session.run(query=data_query, session_id=session_id, data_id=data_id)
-            print(f"_get_conflict_context result:{data_query}")
             data_record = await data_result.single()
 
             # 機能1の詳細情報を取得
@@ -590,7 +598,6 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-            print(f"_detect_actor_hardware_conflicts result:{result}")
             conflicts = []
 
             async for record in result:
@@ -616,13 +623,18 @@ class ProblemDetector:
 【質問】
 {record['accessing_actor']}は{record['hardware_name']}を間接的に制御できますが、制約"{record['constraint_description']}"と矛盾していますか？
 
-回答 (YES/NO/UNCLEAR):
-理由:
-推奨対処:"""
+【出力形式】
+必ず以下のJSON形式で回答してください：
+```json
+{{
+  "answer": "YES" または "NO" または "UNCLEAR",
+  "reasoning": "矛盾の有無とその理由を説明",
+  "recommended_action": "推奨される対処方法"
+}}
+```"""
 
                 # LLMに判定を依頼
                 judgment = await self._llm_judge_contradiction(prompt)
-                print(f"judgement: {judgment}")
                 
                 # 矛盾と判定された場合のみ結果に追加
                 if judgment["is_contradiction"]:
@@ -639,6 +651,7 @@ class ProblemDetector:
                         "allowed_actors": [a for a in record["allowed_actors"] if a],
                         "access_path": access_path,
                         "issue_type": "Actor-Hardware間接制御とConstraintの矛盾",
+                        "llm_prompt": prompt,
                         "llm_reasoning": judgment["reasoning"],
                         "recommended_action": judgment["recommended_action"]
                     })
@@ -679,7 +692,6 @@ class ProblemDetector:
             """
 
             result = await session.run(query, session_id=session_id)
-            print(f"_detect_actor_data_conflicts result:{result}")
             conflicts = []
 
             async for record in result:
@@ -705,13 +717,18 @@ class ProblemDetector:
 【質問】
 {record['accessing_actor']}は{record['data_name']}を間接的に{record['access_action']}できますが、制約"{record['constraint_description']}"と矛盾していますか？
 
-回答 (YES/NO/UNCLEAR):
-理由:
-推奨対処:"""
+【出力形式】
+必ず以下のJSON形式で回答してください：
+```json
+{{
+  "answer": "YES" または "NO" または "UNCLEAR",
+  "reasoning": "矛盾の有無とその理由を説明",
+  "recommended_action": "推奨される対処方法"
+}}
+```"""
 
                 # LLMに判定を依頼
                 judgment = await self._llm_judge_contradiction(prompt)
-                print(f"judgement: {judgment}")
                 
                 # 矛盾と判定された場合のみ結果に追加
                 if judgment["is_contradiction"]:
@@ -729,6 +746,7 @@ class ProblemDetector:
                         "allowed_actors": [a for a in record["allowed_actors"] if a],
                         "access_path": access_path,
                         "issue_type": "Actor-Data間接アクセスとConstraintの矛盾",
+                        "llm_prompt": prompt,
                         "llm_reasoning": judgment["reasoning"],
                         "recommended_action": judgment["recommended_action"]
                     })
