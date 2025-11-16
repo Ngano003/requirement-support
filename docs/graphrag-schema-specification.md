@@ -716,8 +716,15 @@ RETURN a.name AS actor_name,
 権限1: {permission1}
 権限2: {permission2}
 
-回答 (YES/NO/UNCLEAR):
-理由:
+【出力形式】
+必ず以下のJSON形式で回答してください：
+```json
+{
+  "answer": "YES" または "NO" または "UNCLEAR",
+  "reasoning": "矛盾の有無とその理由を説明",
+  "recommended_action": "推奨される対処方法"
+}
+```
 ```
 
 ---
@@ -766,9 +773,15 @@ RETURN d.name AS data_name,
 機能2: {function2} - {function2_description}
   操作: {function2_action}
 
-回答 (YES/NO/UNCLEAR):
-理由:
-推奨対処:
+【出力形式】
+必ず以下のJSON形式で回答してください：
+```json
+{
+  "answer": "YES" または "NO" または "UNCLEAR",
+  "reasoning": "矛盾の有無とその理由を説明",
+  "recommended_action": "推奨される対処方法"
+}
+```
 ```
 
 ---
@@ -858,9 +871,15 @@ RETURN a.name AS accessing_actor,
 【質問】
 {accessing_actor}は{hardware_name}を間接的に制御できますが、制約"{constraint_description}"と矛盾していますか？
 
-回答 (YES/NO/UNCLEAR):
-理由:
-推奨対処:
+【出力形式】
+必ず以下のJSON形式で回答してください：
+```json
+{
+  "answer": "YES" または "NO" または "UNCLEAR",
+  "reasoning": "矛盾の有無とその理由を説明",
+  "recommended_action": "推奨される対処方法"
+}
+```
 ```
 
 ---
@@ -916,9 +935,15 @@ RETURN a.name AS accessing_actor,
 【質問】
 {accessing_actor}は{data_name}を間接的に操作できますが、制約"{constraint_description}"と矛盾していますか？
 
-回答 (YES/NO/UNCLEAR):
-理由:
-推奨対処:
+【出力形式】
+必ず以下のJSON形式で回答してください：
+```json
+{
+  "answer": "YES" または "NO" または "UNCLEAR",
+  "reasoning": "矛盾の有無とその理由を説明",
+  "recommended_action": "推奨される対処方法"
+}
+```
 ```
 
 ---

@@ -11,7 +11,9 @@ Cypherクエリでヌケモレと矛盾を検出
 - LLMで候補が本当に矛盾しているか論理判定
 """
 
+import json
 import logging
+import re
 from typing import Dict, Any, List
 from neo4j import AsyncGraphDatabase, AsyncDriver
 
@@ -96,9 +98,6 @@ class ProblemDetector:
                 response_text = response.choices[0].message.content
 
             # JSONを抽出（```json ... ``` や { ... } の形式に対応）
-            import json
-            import re
-
             # JSONブロックを探す（```json ... ``` 形式）
             json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
             if json_match:
@@ -231,6 +230,11 @@ class ProblemDetector:
             await self._detect_actor_data_conflicts(session_id)
         )
 
+        # 6. Constraint同士の矛盾（候補抽出 + LLM判定）
+        result["constraint_conflicts"] = (
+            await self._detect_constraint_conflicts(session_id)
+        )
+
         return result
 
     async def _detect_isolated_functions(self, session_id: str) -> List[Dict]:
@@ -265,8 +269,8 @@ class ProblemDetector:
         async with self.driver.session() as session:
             query = """
                 MATCH (a:Actor {session_id: $session_id})
-                OPTIONAL MATCH (a)-[:USES]->(:Function {session_id: $session_id})
-                WITH a, count(*) AS uses_count
+                OPTIONAL MATCH (a)-[r:USES]->(f:Function {session_id: $session_id})
+                WITH a, count(r) AS uses_count
                 WHERE uses_count = 0
                 RETURN a.name AS actor_name,
                        a.description AS description,
@@ -340,8 +344,8 @@ class ProblemDetector:
         async with self.driver.session() as session:
             query = """
                 MATCH (c:Constraint {session_id: $session_id})
-                OPTIONAL MATCH (c)-[:APPLIES_TO]->()
-                WITH c, count(*) AS applies_count
+                OPTIONAL MATCH (c)-[r:APPLIES_TO]->(target)
+                WITH c, count(r) AS applies_count
                 WHERE applies_count = 0
                 RETURN c.name AS constraint_name,
                        c.category AS category,
@@ -746,6 +750,96 @@ class ProblemDetector:
                         "allowed_actors": [a for a in record["allowed_actors"] if a],
                         "access_path": access_path,
                         "issue_type": "Actor-Data間接アクセスとConstraintの矛盾",
+                        "llm_prompt": prompt,
+                        "llm_reasoning": judgment["reasoning"],
+                        "recommended_action": judgment["recommended_action"]
+                    })
+
+            return conflicts
+
+    async def _detect_constraint_conflicts(self, session_id: str) -> List[Dict]:
+        """
+        Constraint同士の矛盾を検出（Query 11）
+
+        同一ノードに複数のConstraintが適用されている場合、
+        それらのConstraintが論理的に矛盾していないかをLLMで判定
+        """
+        async with self.driver.session() as session:
+            # Cypherで同一ノードに適用されているConstraintペアを抽出
+            query = """
+                MATCH (c1:Constraint {session_id: $session_id})-[:APPLIES_TO]->(target),
+                      (c2:Constraint {session_id: $session_id})-[:APPLIES_TO]->(target)
+                WHERE c1.entity_id < c2.entity_id
+                RETURN c1.name AS constraint1,
+                       c1.entity_id AS constraint1_id,
+                       c1.category AS category1,
+                       c1.description AS description1,
+                       c2.name AS constraint2,
+                       c2.entity_id AS constraint2_id,
+                       c2.category AS category2,
+                       c2.description AS description2,
+                       target.name AS target_name,
+                       target.entity_id AS target_id,
+                       labels(target)[0] AS target_type
+            """
+
+            result = await session.run(query, session_id=session_id)
+            conflicts = []
+
+            async for record in result:
+                # LLM判定用プロンプトを構築
+                prompt = f"""以下の2つの制約が同一の対象に適用されていますが、論理的に矛盾していますか？
+
+【制約1】
+名称: {record['constraint1']}
+カテゴリ: {record['category1']}
+内容: "{record.get('description1', record['constraint1'])}"
+
+【制約2】
+名称: {record['constraint2']}
+カテゴリ: {record['category2']}
+内容: "{record.get('description2', record['constraint2'])}"
+
+【適用対象】
+対象名: {record['target_name']} ({record['target_type']})
+
+【判定基準】
+- 数値的な矛盾（例：最大速度1.0m/s と 最大速度0.1m/s以下）
+- 論理的な矛盾（例：「常に有効」と「特定条件でのみ有効」）
+- 実装不可能な矛盾（例：「暗号化必須」と「暗号化禁止」）
+
+【質問】
+これら2つの制約は、{record['target_name']}に対して同時に満たすことができますか？
+矛盾している場合は、具体的にどのように矛盾しているかを説明してください。
+
+【出力形式】
+必ず以下のJSON形式で回答してください：
+```json
+{{
+  "answer": "YES" または "NO" または "UNCLEAR",
+  "reasoning": "矛盾の有無とその理由を詳しく説明",
+  "recommended_action": "推奨される対処方法（矛盾を解消する具体的な方法）"
+}}
+```"""
+
+                # LLMに判定を依頼
+                judgment = await self._llm_judge_contradiction(prompt)
+
+                # 矛盾と判定された場合のみ結果に追加
+                if judgment["is_contradiction"]:
+                    conflicts.append({
+                        "constraint1": record["constraint1"],
+                        "constraint1_id": record["constraint1_id"],
+                        "category1": record["category1"],
+                        "description1": record.get("description1", record["constraint1"]),
+                        "constraint2": record["constraint2"],
+                        "constraint2_id": record["constraint2_id"],
+                        "category2": record["category2"],
+                        "description2": record.get("description2", record["constraint2"]),
+                        "target_name": record["target_name"],
+                        "target_id": record["target_id"],
+                        "target_type": record["target_type"],
+                        "issue_type": "Constraint同士の矛盾",
                         "llm_prompt": prompt,
                         "llm_reasoning": judgment["reasoning"],
                         "recommended_action": judgment["recommended_action"]

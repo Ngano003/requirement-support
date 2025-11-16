@@ -192,6 +192,7 @@ class GraphRAGPoC:
             "data_access_conflicts": len(contradictions["data_access_conflicts"]),
             "actor_hardware_conflicts": len(contradictions.get("actor_hardware_conflicts", [])),
             "actor_data_conflicts": len(contradictions.get("actor_data_conflicts", [])),
+            "constraint_conflicts": len(contradictions.get("constraint_conflicts", [])),
         }
 
         # 総合評価

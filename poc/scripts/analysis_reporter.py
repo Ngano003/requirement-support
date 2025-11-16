@@ -133,20 +133,26 @@ class AnalysisReporter:
 
     async def _call_llm(self, prompt: str) -> str:
         """LLMを呼び出してレスポンスを取得"""
-        if self.google_model:
-            # Google AI Studio (Gemini)
-            response = self.google_model.generate_content(prompt)
-            return response.text
-        else:
-            # OpenAI互換API
-            response = await self.llm_client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.5,  # レポート生成は適度な創造性を許容
-            )
-            return response.choices[0].message.content
+        try:
+            if self.google_model:
+                # Google AI Studio (Gemini)
+                response = self.google_model.generate_content(prompt)
+                # 安全フィルターでブロックされた場合のハンドリング
+                if not response.candidates or not response.candidates[0].content.parts:
+                    return "（LLMレスポンスが安全フィルターによりブロックされました。手動で確認が必要です）"
+                return response.text
+            else:
+                # OpenAI互換API
+                response = await self.llm_client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.5,  # レポート生成は適度な創造性を許容
+                )
+                return response.choices[0].message.content
+        except Exception as e:
+            return f"（LLMレスポンス取得エラー: {str(e)}）"
 
     async def _generate_issues_details_with_llm(self, result: Dict[str, Any]) -> List[str]:
         """LLMを使って問題の詳細セクションを生成"""
@@ -240,6 +246,40 @@ class AnalysisReporter:
 2. **詳細な分析**（矛盾の本質、なぜ問題なのか、セキュリティへの影響）
 3. **具体的な対処方法**（優先度順に箇条書き、各項目50文字程度）
 4. **考慮すべき点**（実装時の注意事項）
+
+注意：マークダウン形式で出力してください（見出しは####から開始）。"""
+
+                    llm_analysis = await self._call_llm(prompt)
+                    lines.append(llm_analysis)
+                    lines.append("")
+
+            # Constraint同士の矛盾（LLMで深い考察を生成）
+            if summary.get("constraint_conflicts", 0) > 0:
+                lines.append(f"#### Constraint同士の矛盾（{summary['constraint_conflicts']}件）")
+                lines.append("")
+
+                for idx, item in enumerate(details["constraint_conflicts"], 1):
+                    # LLMに深い考察を依頼
+                    prompt = f"""以下のConstraint同士の矛盾について、詳細な分析レポートを作成してください。
+
+【検出された矛盾】
+- 対象: {item['target_name']} ({item['target_type']})
+- 制約1: {item['constraint1']} ({item['category1']})
+  - 内容: "{item['description1']}"
+- 制約2: {item['constraint2']} ({item['category2']})
+  - 内容: "{item['description2']}"
+
+【LLMによる矛盾判定理由】
+{item.get('llm_reasoning', '理由なし')}
+
+【推奨対処】
+{item.get('recommended_action', '対処方法なし')}
+
+以下の形式でマークダウンレポートを作成してください：
+1. **矛盾の概要**（50-100文字で簡潔に）
+2. **詳細な分析**（矛盾の本質、なぜ問題なのか、実装への影響）
+3. **具体的な対処方法**（優先度順に箇条書き、各項目50文字程度）
+4. **考慮すべき点**（実装時の注意事項、トレードオフなど）
 
 注意：マークダウン形式で出力してください（見出しは####から開始）。"""
 
@@ -735,6 +775,10 @@ class AnalysisReporter:
                 lines.append(f"{priority}. **Actor→Data制約違反の解消** - データアクセスの制約を満たすよう機能を修正")
                 priority += 1
 
+            if contradictions.get("constraint_conflicts", 0) > 0:
+                lines.append(f"{priority}. **Constraint同士の矛盾の解消** - 競合する制約を見直し、整合性を確保")
+                priority += 1
+
             # ヌケモレ
             if missing.get("missing_security_constraints", 0) > 0:
                 lines.append(f"{priority}. **セキュリティ制約の追加** - 機密データの保護を明記")
@@ -819,6 +863,12 @@ class AnalysisReporter:
                     print(f"    - 権限の競合: {contradictions['permission_conflicts']}件")
                 if contradictions["data_access_conflicts"] > 0:
                     print(f"    - データアクセスの矛盾: {contradictions['data_access_conflicts']}件")
+                if contradictions.get("actor_hardware_conflicts", 0) > 0:
+                    print(f"    - Actor→Hardware制約違反: {contradictions['actor_hardware_conflicts']}件")
+                if contradictions.get("actor_data_conflicts", 0) > 0:
+                    print(f"    - Actor→Data制約違反: {contradictions['actor_data_conflicts']}件")
+                if contradictions.get("constraint_conflicts", 0) > 0:
+                    print(f"    - Constraint同士の矛盾: {contradictions['constraint_conflicts']}件")
 
         print("\n⏱️  処理時間: {:.2f}秒".format(result["performance"]["total_time_seconds"]))
         print("=" * 80)
