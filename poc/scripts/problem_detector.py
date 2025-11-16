@@ -1,7 +1,14 @@
 """
-問題検出器（GraphRAG PoC用）
+問題検出器（GraphRAG PoC用 - IS/SHOULDレイヤーモデル）
 
 Cypherクエリでヌケモレと矛盾を検出
+- ISレイヤー: Function中心の構造グラフからヌケモレを検出
+- SHOULDレイヤー: Constraint中心の制約グラフから矛盾を検出
+- IS vs SHOULD: 構造と制約の矛盾を検出
+
+矛盾検出アプローチ：
+- Cypherで矛盾の可能性がある候補ペアを抽出
+- LLMで候補が本当に矛盾しているか論理判定
 """
 
 import logging
@@ -20,6 +27,26 @@ class ProblemDetector:
         self.config = config
         self.driver: AsyncDriver | None = None
 
+        # LLMクライアント初期化
+        llm_config = config.get_llm_client_config()
+        self.llm_provider = config.llm_provider
+        self.model = llm_config["model"]
+
+        # プロバイダーに応じてクライアントを初期化
+        if llm_config.get("provider") == "google_ai":
+            import google.generativeai as genai
+            genai.configure(api_key=llm_config["api_key"])
+            self.google_model = genai.GenerativeModel(self.model)
+            self.client = None
+        else:
+            # OpenAI互換API（OpenAI、OpenRouter、vLLM）
+            from openai import AsyncOpenAI
+            self.client = AsyncOpenAI(
+                api_key=llm_config["api_key"],
+                base_url=llm_config.get("base_url"),
+            )
+            self.google_model = None
+
     async def connect(self):
         """Memgraphに接続"""
         uri = f"bolt://{self.config.memgraph_host}:{self.config.memgraph_port}"
@@ -37,6 +64,80 @@ class ProblemDetector:
         """接続を閉じる"""
         if self.driver:
             await self.driver.close()
+
+    async def _llm_judge_contradiction(self, prompt: str) -> Dict[str, Any]:
+        """
+        LLMを使って矛盾候補が本当に矛盾しているか判定
+
+        Args:
+            prompt: 判定用プロンプト
+
+        Returns:
+            {
+                "is_contradiction": bool,
+                "reasoning": str,
+                "recommended_action": str
+            }
+        """
+        try:
+            print(f"prompt:{prompt}")
+            if self.google_model:
+                # Google AI Studio (Gemini)
+                response = self.google_model.generate_content(prompt)
+                response_text = response.text
+            else:
+                # OpenAI互換API
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,  # 判定は一貫性を重視
+                )
+                response_text = response.choices[0].message.content
+
+            # レスポンスをパース
+            # 期待形式: "回答 (YES/NO/UNCLEAR): 理由: 推奨対処:"
+            print(f"response:{response_text}")
+            lines = response_text.strip().split('\n')
+            is_contradiction = False
+            reasoning = ""
+            recommended_action = ""
+
+            for line in lines:
+                if line.startswith("回答") or line.startswith("答え") or line.startswith("判定"):
+                    # YES/NO/UNCLEARを抽出
+                    if "YES" in line.upper() or "はい" in line or "矛盾" in line:
+                        is_contradiction = True
+                elif line.startswith("理由"):
+                    reasoning = line.split(":", 1)[1].strip() if ":" in line else line
+                elif line.startswith("推奨対処") or line.startswith("対処"):
+                    recommended_action = line.split(":", 1)[1].strip() if ":" in line else line
+                else:
+                    # マルチライン対応
+                    if reasoning and not recommended_action:
+                        reasoning += " " + line
+                    elif recommended_action:
+                        recommended_action += " " + line
+
+            # 理由が取得できなかった場合は全文を理由とする
+            if not reasoning:
+                reasoning = response_text
+
+            return {
+                "is_contradiction": is_contradiction,
+                "reasoning": reasoning.strip(),
+                "recommended_action": recommended_action.strip()
+            }
+
+        except Exception as e:
+            logger.error(f"LLM judgment failed: {e}")
+            # エラー時は安全側（矛盾と判定）
+            return {
+                "is_contradiction": True,
+                "reasoning": f"LLM判定エラー: {str(e)}",
+                "recommended_action": "手動確認が必要"
+            }
 
     async def detect_all(self, session_id: str) -> Dict[str, Any]:
         """
@@ -60,19 +161,33 @@ class ProblemDetector:
         }
 
     async def detect_missing_items(self, session_id: str) -> Dict[str, List[Dict]]:
-        """ヌケモレを検出"""
+        """ヌケモレを検出（ISレイヤー + SHOULDレイヤー）"""
         result = {}
 
-        # 1. 利用されない機能
-        result["unused_functions"] = await self._detect_unused_functions(session_id)
+        # ISレイヤーのヌケモレ
+        # 1. 孤立したFunction
+        result["isolated_functions"] = await self._detect_isolated_functions(session_id)
 
-        # 2. セキュリティ要件の漏れ
-        result["missing_security_requirements"] = (
-            await self._detect_missing_security_requirements(session_id)
-        )
+        # 2. Functionと関係を持たないActor
+        result["unused_actors"] = await self._detect_unused_actors(session_id)
 
-        # 3. 孤立データ
+        # 3. Functionによって満たされていないRequirement
+        result["unsatisfied_requirements"] = await self._detect_unsatisfied_requirements(session_id)
+
+        # 4. Functionと関係を持たないData
         result["orphan_data"] = await self._detect_orphan_data(session_id)
+
+        # 5. Functionと関係を持たないHardware
+        result["orphan_hardware"] = await self._detect_orphan_hardware(session_id)
+
+        # SHOULDレイヤーのヌケモレ
+        # 6. 適用対象のないConstraint
+        result["isolated_constraints"] = await self._detect_isolated_constraints(session_id)
+
+        # 7. セキュリティ制約の漏れ
+        result["missing_security_constraints"] = (
+            await self._detect_missing_security_constraints(session_id)
+        )
 
         return result
 
@@ -80,43 +195,43 @@ class ProblemDetector:
         """矛盾を検出"""
         result = {}
 
-        # 1. 循環依存
+        # 1. 循環依存（確定検出）
         result["circular_dependencies"] = (
             await self._detect_circular_dependencies(session_id)
         )
 
-        # 2. 権限の競合
+        # 2. 権限の競合（候補抽出 + LLM判定）
         result["permission_conflicts"] = (
             await self._detect_permission_conflicts(session_id)
         )
 
-        # 3. データアクセスの矛盾
+        # 3. データアクセスの矛盾（候補抽出 + LLM判定）
         result["data_access_conflicts"] = (
             await self._detect_data_access_conflicts(session_id)
         )
 
+        # 4. Actor→Hardware間接制御とConstraintの矛盾（候補抽出 + LLM判定）
+        result["actor_hardware_conflicts"] = (
+            await self._detect_actor_hardware_conflicts(session_id)
+        )
+
+        # 5. Actor→Data間接アクセスとConstraintの矛盾（候補抽出 + LLM判定）
+        result["actor_data_conflicts"] = (
+            await self._detect_actor_data_conflicts(session_id)
+        )
+
         return result
 
-    async def _detect_unused_functions(self, session_id: str) -> List[Dict]:
-        """利用されない機能を検出"""
+    async def _detect_isolated_functions(self, session_id: str) -> List[Dict]:
+        """孤立したFunction（他のFunctionやActorと無関係）を検出"""
         async with self.driver.session() as session:
-            # MemgraphではEXISTS {}構文ではなく、NOT EXISTS (pattern)を使用
-            # --- 変更前 (エラー) ---
-            # query = """
-            #     MATCH (f:Function {session_id: $session_id})
-            #     WHERE NOT EXISTS ((a:Actor {session_id: $session_id})-[:USES]->(f))
-            #     RETURN f.name AS function_name,
-            #            f.description AS description,
-            #            f.entity_id AS entity_id
-            # """
-            
-            # --- 変更後 (修正) ---
-            # OPTIONAL MATCHとcount()を使用して、関係を持たないノードを検出する
             query = """
                 MATCH (f:Function {session_id: $session_id})
+                OPTIONAL MATCH (f)-[:DEPENDS_ON]->(:Function {session_id: $session_id})
+                OPTIONAL MATCH (f)<-[:DEPENDS_ON]-(:Function {session_id: $session_id})
                 OPTIONAL MATCH (a:Actor {session_id: $session_id})-[:USES]->(f)
-                WITH f, count(a) AS uses_count
-                WHERE uses_count = 0
+                WITH f, count(DISTINCT a) AS actor_count
+                WHERE actor_count = 0
                 RETURN f.name AS function_name,
                        f.description AS description,
                        f.entity_id AS entity_id
@@ -129,26 +244,125 @@ class ProblemDetector:
                     "function_name": record["function_name"],
                     "description": record.get("description"),
                     "entity_id": record["entity_id"],
+                    "issue_type": "孤立したFunction",
                 }
                 async for record in result
             ]
 
-    async def _detect_missing_security_requirements(
+    async def _detect_unused_actors(self, session_id: str) -> List[Dict]:
+        """Functionと関係を持たないActorを検出"""
+        async with self.driver.session() as session:
+            query = """
+                MATCH (a:Actor {session_id: $session_id})
+                OPTIONAL MATCH (a)-[:USES]->(:Function {session_id: $session_id})
+                WITH a, count(*) AS uses_count
+                WHERE uses_count = 0
+                RETURN a.name AS actor_name,
+                       a.description AS description,
+                       a.entity_id AS entity_id
+            """
+
+            result = await session.run(query, session_id=session_id)
+
+            return [
+                {
+                    "actor_name": record["actor_name"],
+                    "description": record.get("description"),
+                    "entity_id": record["entity_id"],
+                    "issue_type": "Functionと関係を持たないActor",
+                }
+                async for record in result
+            ]
+
+    async def _detect_unsatisfied_requirements(self, session_id: str) -> List[Dict]:
+        """Functionによって満たされていないRequirementを検出"""
+        async with self.driver.session() as session:
+            query = """
+                MATCH (r:Requirement {session_id: $session_id})
+                OPTIONAL MATCH (f:Function {session_id: $session_id})-[:SATISFIES]->(r)
+                WITH r, count(f) AS satisfies_count
+                WHERE satisfies_count = 0
+                RETURN r.name AS requirement_name,
+                       r.description AS description,
+                       r.entity_id AS entity_id
+            """
+
+            result = await session.run(query, session_id=session_id)
+
+            return [
+                {
+                    "requirement_name": record["requirement_name"],
+                    "description": record.get("description"),
+                    "entity_id": record["entity_id"],
+                    "issue_type": "Functionによって満たされていないRequirement",
+                }
+                async for record in result
+            ]
+
+    async def _detect_orphan_hardware(self, session_id: str) -> List[Dict]:
+        """Functionと関係を持たないHardwareを検出"""
+        async with self.driver.session() as session:
+            query = """
+                MATCH (h:Hardware {session_id: $session_id})
+                OPTIONAL MATCH (f:Function {session_id: $session_id})-[:CONTROLS]->(h)
+                WITH h, count(f) AS controls_count
+                WHERE controls_count = 0
+                RETURN h.name AS hardware_name,
+                       h.description AS description,
+                       h.entity_id AS entity_id
+            """
+
+            result = await session.run(query, session_id=session_id)
+
+            return [
+                {
+                    "hardware_name": record["hardware_name"],
+                    "description": record.get("description"),
+                    "entity_id": record["entity_id"],
+                    "issue_type": "Functionと関係を持たないHardware",
+                }
+                async for record in result
+            ]
+
+    async def _detect_isolated_constraints(self, session_id: str) -> List[Dict]:
+        """適用対象のないConstraintを検出"""
+        async with self.driver.session() as session:
+            query = """
+                MATCH (c:Constraint {session_id: $session_id})
+                OPTIONAL MATCH (c)-[:APPLIES_TO]->()
+                WITH c, count(*) AS applies_count
+                WHERE applies_count = 0
+                RETURN c.name AS constraint_name,
+                       c.category AS category,
+                       c.entity_id AS entity_id
+            """
+
+            result = await session.run(query, session_id=session_id)
+
+            return [
+                {
+                    "constraint_name": record["constraint_name"],
+                    "category": record.get("category"),
+                    "entity_id": record["entity_id"],
+                    "issue_type": "適用対象のないConstraint",
+                }
+                async for record in result
+            ]
+
+    async def _detect_missing_security_constraints(
         self, session_id: str
     ) -> List[Dict]:
-        """セキュリティ要件の漏れを検出"""
+        """セキュリティ制約の漏れを検出"""
         async with self.driver.session() as session:
-            # OPTIONAL MATCHとcount()を使用して、
-            # 特定の関係を持たないノードを検出する（Memgraph互換）
             query = """
                 MATCH (d:Data {session_id: $session_id})
                 WHERE (d.name CONTAINS '個人情報' OR d.name CONTAINS '決済情報' OR d.sensitivity = 'confidential')
-                
-                OPTIONAL MATCH (r:Requirement {session_id: $session_id, type: 'Security'})-[:APPLIES_TO]->(d)
-                
-                WITH d, count(r) AS security_req_count
-                WHERE security_req_count = 0
-                
+
+                OPTIONAL MATCH (c:Constraint {session_id: $session_id, category: 'Security'})-[:APPLIES_TO]->(d)
+
+                WITH d, count(c) AS security_constraint_count
+                WHERE security_constraint_count = 0
+
                 RETURN d.name AS data_name,
                        d.sensitivity AS sensitivity,
                        d.entity_id AS entity_id
@@ -161,30 +375,21 @@ class ProblemDetector:
                     "data_name": record["data_name"],
                     "sensitivity": record.get("sensitivity"),
                     "entity_id": record["entity_id"],
+                    "issue_type": "セキュリティConstraintが未適用",
                 }
                 async for record in result
             ]
 
     async def _detect_orphan_data(self, session_id: str) -> List[Dict]:
-        """孤立データを検出"""
+        """Functionと関係を持たないDataを検出"""
         async with self.driver.session() as session:
-            # --- 変更前 (エラー) ---
-            # query = """
-            #     MATCH (d:Data {session_id: $session_id})
-            #     WHERE NOT EXISTS ((f:Function {session_id: $session_id})-[:MANIPULATES]->(d))
-            #     RETURN d.name AS data_name,
-            #            d.entity_id AS entity_id
-            # """
-
-            # --- 変更後 (修正) ---
-            # OPTIONAL MATCHとcount()を使用して、
-            # どのFunctionからもMANIPULATESされていないDataを検出
             query = """
                 MATCH (d:Data {session_id: $session_id})
                 OPTIONAL MATCH (f:Function {session_id: $session_id})-[:MANIPULATES]->(d)
                 WITH d, count(f) AS manipulates_count
                 WHERE manipulates_count = 0
                 RETURN d.name AS data_name,
+                       d.description AS description,
                        d.entity_id AS entity_id
             """
 
@@ -193,7 +398,9 @@ class ProblemDetector:
             return [
                 {
                     "data_name": record["data_name"],
+                    "description": record.get("description"),
                     "entity_id": record["entity_id"],
+                    "issue_type": "Functionと関係を持たないData",
                 }
                 async for record in result
             ]
@@ -385,3 +592,181 @@ class ProblemDetector:
                     "data_operations": func2_record["data_operations"] if func2_record else [],
                 },
             }
+
+    async def _detect_actor_hardware_conflicts(self, session_id: str) -> List[Dict]:
+        """
+        Actor→Hardware間接制御とConstraintの矛盾を検出（Query 12-A）
+
+        Actorが Function を経由して Hardware を制御するパスが、
+        排他的なConstraint（「のみ」「only」）と矛盾していないかを検出
+        """
+        async with self.driver.session() as session:
+            # Cypherで候補を抽出
+            query = """
+                MATCH path = (a:Actor {session_id: $session_id})-[:USES]->(f:Function {session_id: $session_id})-[:CONTROLS]->(h:Hardware {session_id: $session_id})
+
+                MATCH (c:Constraint {session_id: $session_id})-[:APPLIES_TO]->(h)
+                WHERE c.name CONTAINS 'のみ' OR c.name CONTAINS 'only'
+
+                OPTIONAL MATCH (c)-[:APPLIES_TO]->(allowed_actor:Actor {session_id: $session_id})
+
+                RETURN a.name AS accessing_actor,
+                       a.entity_id AS accessing_actor_id,
+                       f.name AS function_name,
+                       f.entity_id AS function_id,
+                       f.description AS function_description,
+                       h.name AS hardware_name,
+                       h.entity_id AS hardware_id,
+                       h.description AS hardware_description,
+                       c.name AS constraint_name,
+                       c.entity_id AS constraint_id,
+                       c.name AS constraint_description,
+                       c.category AS constraint_category,
+                       collect(DISTINCT allowed_actor.name) AS allowed_actors,
+                       nodes(path) AS path_nodes
+            """
+
+            result = await session.run(query, session_id=session_id)
+
+            conflicts = []
+
+            async for record in result:
+                # アクセスパスを生成
+                access_path = [node["name"] for node in record["path_nodes"]]
+
+                # LLM判定用プロンプトを構築
+                allowed_actors_str = ", ".join([a for a in record["allowed_actors"] if a]) or "明示的な許可なし"
+
+                prompt = f"""以下の構造パスと制約を分析し、論理的な矛盾があるか判定してください。
+
+【構造（IS）】
+アクセスパス: {" → ".join(access_path)}
+- {record['accessing_actor']}が{record['function_name']}を使用し、その機能が{record['hardware_name']}を制御します
+- 機能の説明: {record.get('function_description', '説明なし')}
+- ハードウェアの説明: {record.get('hardware_description', '説明なし')}
+
+【制約（SHOULD）】
+制約: {record['constraint_name']} ({record['constraint_category']})
+内容: "{record['constraint_description']}"
+許可されているアクター: {allowed_actors_str}
+
+【質問】
+{record['accessing_actor']}は{record['hardware_name']}を間接的に制御できますが、制約"{record['constraint_description']}"と矛盾していますか？
+
+回答 (YES/NO/UNCLEAR):
+理由:
+推奨対処:"""
+
+                # LLMに判定を依頼
+                judgment = await self._llm_judge_contradiction(prompt)
+
+                # 矛盾と判定された場合のみ結果に追加
+                if judgment["is_contradiction"]:
+                    conflicts.append({
+                        "accessing_actor": record["accessing_actor"],
+                        "accessing_actor_id": record["accessing_actor_id"],
+                        "function_name": record["function_name"],
+                        "function_id": record["function_id"],
+                        "hardware_name": record["hardware_name"],
+                        "hardware_id": record["hardware_id"],
+                        "constraint_name": record["constraint_name"],
+                        "constraint_id": record["constraint_id"],
+                        "constraint_description": record["constraint_description"],
+                        "allowed_actors": [a for a in record["allowed_actors"] if a],
+                        "access_path": access_path,
+                        "issue_type": "Actor-Hardware間接制御とConstraintの矛盾",
+                        "llm_reasoning": judgment["reasoning"],
+                        "recommended_action": judgment["recommended_action"]
+                    })
+
+            return conflicts
+
+    async def _detect_actor_data_conflicts(self, session_id: str) -> List[Dict]:
+        """
+        Actor→Data間接アクセスとConstraintの矛盾を検出（Query 12-B）
+
+        Actorが Function を経由して Data にアクセスするパスが、
+        排他的なConstraint（「のみ」「only」）と矛盾していないかを検出
+        """
+        async with self.driver.session() as session:
+            # Cypherで候補を抽出
+            query = """
+                MATCH path = (a:Actor {session_id: $session_id})-[:USES]->(f:Function {session_id: $session_id})-[m:MANIPULATES]->(d:Data {session_id: $session_id})
+
+                MATCH (c:Constraint {session_id: $session_id})-[:APPLIES_TO]->(d)
+                WHERE c.name CONTAINS 'のみ' OR c.name CONTAINS 'only'
+
+                OPTIONAL MATCH (c)-[:APPLIES_TO]->(allowed_actor:Actor {session_id: $session_id})
+
+                RETURN a.name AS accessing_actor,
+                       a.entity_id AS accessing_actor_id,
+                       f.name AS function_name,
+                       f.entity_id AS function_id,
+                       f.description AS function_description,
+                       d.name AS data_name,
+                       d.entity_id AS data_id,
+                       d.description AS data_description,
+                       m.action AS access_action,
+                       c.name AS constraint_name,
+                       c.entity_id AS constraint_id,
+                       c.name AS constraint_description,
+                       c.category AS constraint_category,
+                       collect(DISTINCT allowed_actor.name) AS allowed_actors,
+                       nodes(path) AS path_nodes
+            """
+
+            result = await session.run(query, session_id=session_id)
+
+            conflicts = []
+
+            async for record in result:
+                # アクセスパスを生成
+                access_path = [node["name"] for node in record["path_nodes"]]
+
+                # LLM判定用プロンプトを構築
+                allowed_actors_str = ", ".join([a for a in record["allowed_actors"] if a]) or "明示的な許可なし"
+
+                prompt = f"""以下の構造パスと制約を分析し、論理的な矛盾があるか判定してください。
+
+【構造（IS）】
+アクセスパス: {" → ".join(access_path)}
+- {record['accessing_actor']}が{record['function_name']}を使用し、その機能が{record['data_name']}に{record['access_action']}アクセスします
+- 機能の説明: {record.get('function_description', '説明なし')}
+- データの説明: {record.get('data_description', '説明なし')}
+
+【制約（SHOULD）】
+制約: {record['constraint_name']} ({record['constraint_category']})
+内容: "{record['constraint_description']}"
+許可されているアクター: {allowed_actors_str}
+
+【質問】
+{record['accessing_actor']}は{record['data_name']}を間接的に{record['access_action']}できますが、制約"{record['constraint_description']}"と矛盾していますか？
+
+回答 (YES/NO/UNCLEAR):
+理由:
+推奨対処:"""
+
+                # LLMに判定を依頼
+                judgment = await self._llm_judge_contradiction(prompt)
+
+                # 矛盾と判定された場合のみ結果に追加
+                if judgment["is_contradiction"]:
+                    conflicts.append({
+                        "accessing_actor": record["accessing_actor"],
+                        "accessing_actor_id": record["accessing_actor_id"],
+                        "function_name": record["function_name"],
+                        "function_id": record["function_id"],
+                        "data_name": record["data_name"],
+                        "data_id": record["data_id"],
+                        "access_action": record["access_action"],
+                        "constraint_name": record["constraint_name"],
+                        "constraint_id": record["constraint_id"],
+                        "constraint_description": record["constraint_description"],
+                        "allowed_actors": [a for a in record["allowed_actors"] if a],
+                        "access_path": access_path,
+                        "issue_type": "Actor-Data間接アクセスとConstraintの矛盾",
+                        "llm_reasoning": judgment["reasoning"],
+                        "recommended_action": judgment["recommended_action"]
+                    })
+
+            return conflicts

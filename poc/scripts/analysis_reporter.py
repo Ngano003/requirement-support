@@ -64,12 +64,24 @@ class AnalysisReporter:
             lines.append("✅ **問題は検出されませんでした**")
             lines.append("")
             lines.append("この要件定義書は以下の観点で問題がありません：")
-            lines.append("- 利用されない機能")
-            lines.append("- セキュリティ要件の漏れ")
+            lines.append("")
+            lines.append("**ISレイヤー（構造グラフ）のヌケモレ:**")
+            lines.append("- 孤立した機能")
+            lines.append("- 未使用のアクター")
+            lines.append("- 未充足の要件")
             lines.append("- 孤立データ")
+            lines.append("- 孤立ハードウェア")
+            lines.append("")
+            lines.append("**SHOULDレイヤー（制約グラフ）のヌケモレ:**")
+            lines.append("- 孤立した制約")
+            lines.append("- セキュリティ制約の漏れ")
+            lines.append("")
+            lines.append("**矛盾:**")
             lines.append("- 循環依存")
             lines.append("- 権限の競合")
             lines.append("- データアクセスの矛盾")
+            lines.append("- Actor→Hardware制約違反")
+            lines.append("- Actor→Data制約違反")
         else:
             lines.append(f"⚠️ **合計 {total_issues} 件の問題が検出されました**")
             lines.append("")
@@ -116,13 +128,14 @@ class AnalysisReporter:
             lines.append("✅ ヌケモレは検出されませんでした。")
             lines.append("")
         else:
-            # 1. 利用されない機能
-            if summary["unused_functions"] > 0:
-                lines.append(f"#### 1. 利用されない機能（{summary['unused_functions']}件）")
+            # ISレイヤーのヌケモレ
+            # 1. 孤立した機能（利用されず、依存もされない）
+            if summary.get("isolated_functions", 0) > 0:
+                lines.append(f"#### 1. 孤立した機能（{summary['isolated_functions']}件）")
                 lines.append("")
-                lines.append("以下の機能はどのアクターからも利用されていません：")
+                lines.append("以下の機能はどのアクターからも利用されず、どの機能からも依存されていません：")
                 lines.append("")
-                for item in details["unused_functions"]:
+                for item in details["isolated_functions"]:
                     lines.append(f"- **{item['function_name']}** (`{item['entity_id']}`)")
                     if item.get("description"):
                         lines.append(f"  - 説明: {item['description']}")
@@ -130,23 +143,37 @@ class AnalysisReporter:
                 lines.append("**影響**: これらの機能は実装されても使われない可能性があります。")
                 lines.append("")
 
-            # 2. セキュリティ要件の漏れ
-            if summary["missing_security_requirements"] > 0:
-                lines.append(f"#### 2. セキュリティ要件の漏れ（{summary['missing_security_requirements']}件）")
+            # 2. 未使用のアクター
+            if summary.get("unused_actors", 0) > 0:
+                lines.append(f"#### 2. 未使用のアクター（{summary['unused_actors']}件）")
                 lines.append("")
-                lines.append("以下の機密データにセキュリティ要件が適用されていません：")
+                lines.append("以下のアクターはどの機能も使用していません：")
                 lines.append("")
-                for item in details["missing_security_requirements"]:
-                    lines.append(f"- **{item['data_name']}** (`{item['entity_id']}`)")
-                    if item.get("sensitivity"):
-                        lines.append(f"  - 機密性: {item['sensitivity']}")
+                for item in details["unused_actors"]:
+                    lines.append(f"- **{item['actor_name']}** (`{item['entity_id']}`)")
+                    if item.get("description"):
+                        lines.append(f"  - 説明: {item['description']}")
                 lines.append("")
-                lines.append("**影響**: データ保護が不十分になる可能性があります。")
+                lines.append("**影響**: これらのアクターの役割が不明確です。")
                 lines.append("")
 
-            # 3. 孤立データ
-            if summary["orphan_data"] > 0:
-                lines.append(f"#### 3. 孤立データ（{summary['orphan_data']}件）")
+            # 3. 未充足の要件
+            if summary.get("unsatisfied_requirements", 0) > 0:
+                lines.append(f"#### 3. 未充足の要件（{summary['unsatisfied_requirements']}件）")
+                lines.append("")
+                lines.append("以下の要件はどの機能によっても満たされていません：")
+                lines.append("")
+                for item in details["unsatisfied_requirements"]:
+                    lines.append(f"- **{item['requirement_name']}** (`{item['entity_id']}`)")
+                    if item.get("description"):
+                        lines.append(f"  - 説明: {item['description']}")
+                lines.append("")
+                lines.append("**影響**: これらの要件が実現されない可能性があります。")
+                lines.append("")
+
+            # 4. 孤立データ
+            if summary.get("orphan_data", 0) > 0:
+                lines.append(f"#### 4. 孤立データ（{summary['orphan_data']}件）")
                 lines.append("")
                 lines.append("以下のデータはどの機能からも操作されていません：")
                 lines.append("")
@@ -154,6 +181,51 @@ class AnalysisReporter:
                     lines.append(f"- **{item['data_name']}** (`{item['entity_id']}`)")
                 lines.append("")
                 lines.append("**影響**: これらのデータは使用されない可能性があります。")
+                lines.append("")
+
+            # 5. 孤立ハードウェア
+            if summary.get("orphan_hardware", 0) > 0:
+                lines.append(f"#### 5. 孤立ハードウェア（{summary['orphan_hardware']}件）")
+                lines.append("")
+                lines.append("以下のハードウェアはどの機能からも制御されていません：")
+                lines.append("")
+                for item in details["orphan_hardware"]:
+                    lines.append(f"- **{item['hardware_name']}** (`{item['entity_id']}`)")
+                    if item.get("description"):
+                        lines.append(f"  - 説明: {item['description']}")
+                lines.append("")
+                lines.append("**影響**: これらのハードウェアは使用されない可能性があります。")
+                lines.append("")
+
+            # SHOULDレイヤーのヌケモレ
+            # 6. 孤立した制約
+            if summary.get("isolated_constraints", 0) > 0:
+                lines.append(f"#### 6. 孤立した制約（{summary['isolated_constraints']}件）")
+                lines.append("")
+                lines.append("以下の制約はどのノードにも適用されていません：")
+                lines.append("")
+                for item in details["isolated_constraints"]:
+                    lines.append(f"- **{item['constraint_name']}** (`{item['entity_id']}`)")
+                    if item.get("category"):
+                        lines.append(f"  - カテゴリー: {item['category']}")
+                    if item.get("description"):
+                        lines.append(f"  - 説明: {item['description']}")
+                lines.append("")
+                lines.append("**影響**: これらの制約が実際には適用されない可能性があります。")
+                lines.append("")
+
+            # 7. セキュリティ制約の漏れ
+            if summary.get("missing_security_constraints", 0) > 0:
+                lines.append(f"#### 7. セキュリティ制約の漏れ（{summary['missing_security_constraints']}件）")
+                lines.append("")
+                lines.append("以下の機密データにセキュリティ制約が適用されていません：")
+                lines.append("")
+                for item in details["missing_security_constraints"]:
+                    lines.append(f"- **{item['data_name']}** (`{item['entity_id']}`)")
+                    if item.get("sensitivity"):
+                        lines.append(f"  - 機密性: {item['sensitivity']}")
+                lines.append("")
+                lines.append("**影響**: データ保護が不十分になる可能性があります。")
                 lines.append("")
 
         lines.append("---")
@@ -323,6 +395,47 @@ class AnalysisReporter:
                 lines.append("5. **並行性制御の要件追加**: 同時書き込み時の動作（エラー、待機、マージ）を明確化")
                 lines.append("")
 
+            # 4. Actor→Hardware間接制御の矛盾
+            if summary.get("actor_hardware_conflicts", 0) > 0:
+                lines.append(f"#### 4. Actor→Hardware間接制御の矛盾（{summary['actor_hardware_conflicts']}件）")
+                lines.append("")
+                lines.append("以下のアクターがハードウェアを間接的に制御していますが、制約と矛盾しています：")
+                lines.append("")
+                for item in details["actor_hardware_conflicts"]:
+                    lines.append(f"- **{item['accessing_actor']}** → **{item['function_name']}** → **{item['hardware_name']}**")
+                    lines.append(f"  - アクセスパス: {' → '.join(item['access_path'])}")
+                    lines.append(f"  - 制約: {item['constraint_name']} (`{item['constraint_id']}`)")
+                    lines.append(f"  - 制約内容: \"{item['constraint_description']}\"")
+                    if item.get('allowed_actors'):
+                        lines.append(f"  - 許可されているアクター: {', '.join(item['allowed_actors'])}")
+                    lines.append(f"  - **LLM判定理由**: {item.get('llm_reasoning', '理由なし')}")
+                    if item.get('recommended_action'):
+                        lines.append(f"  - **推奨対処**: {item['recommended_action']}")
+                lines.append("")
+                lines.append("**影響**: アクターが制約に違反してハードウェアを制御できる状態です。")
+                lines.append("")
+
+            # 5. Actor→Data間接アクセスの矛盾
+            if summary.get("actor_data_conflicts", 0) > 0:
+                lines.append(f"#### 5. Actor→Data間接アクセスの矛盾（{summary['actor_data_conflicts']}件）")
+                lines.append("")
+                lines.append("以下のアクターがデータを間接的にアクセスしていますが、制約と矛盾しています：")
+                lines.append("")
+                for item in details["actor_data_conflicts"]:
+                    lines.append(f"- **{item['accessing_actor']}** → **{item['function_name']}** → **{item['data_name']}**")
+                    lines.append(f"  - アクセスパス: {' → '.join(item['access_path'])}")
+                    lines.append(f"  - アクセス種別: {item['access_action']}")
+                    lines.append(f"  - 制約: {item['constraint_name']} (`{item['constraint_id']}`)")
+                    lines.append(f"  - 制約内容: \"{item['constraint_description']}\"")
+                    if item.get('allowed_actors'):
+                        lines.append(f"  - 許可されているアクター: {', '.join(item['allowed_actors'])}")
+                    lines.append(f"  - **LLM判定理由**: {item.get('llm_reasoning', '理由なし')}")
+                    if item.get('recommended_action'):
+                        lines.append(f"  - **推奨対処**: {item['recommended_action']}")
+                lines.append("")
+                lines.append("**影響**: アクターが制約に違反してデータにアクセスできる状態です。")
+                lines.append("")
+
         lines.append("---")
         lines.append("")
         return lines
@@ -376,12 +489,23 @@ class AnalysisReporter:
         if summary["total_issues"] == 0:
             lines.append("✅ 要件定義書は良好な状態です。以下の点を確認してください：")
             lines.append("")
-            lines.append("1. すべての機能が適切なアクターに紐付いている")
-            lines.append("2. 機密データにセキュリティ要件が適用されている")
-            lines.append("3. すべてのデータが適切な機能で操作されている")
-            lines.append("4. 機能間の依存関係に循環がない")
-            lines.append("5. 権限設定に矛盾がない")
-            lines.append("6. データアクセスに競合がない")
+            lines.append("**ISレイヤー（構造グラフ）:**")
+            lines.append("1. すべての機能が適切なアクターまたは他の機能に紐付いている")
+            lines.append("2. すべてのアクターが機能を使用している")
+            lines.append("3. すべての要件が機能によって満たされている")
+            lines.append("4. すべてのデータが適切な機能で操作されている")
+            lines.append("5. すべてのハードウェアが適切な機能で制御されている")
+            lines.append("")
+            lines.append("**SHOULDレイヤー（制約グラフ）:**")
+            lines.append("6. すべての制約が適切なノードに適用されている")
+            lines.append("7. 機密データにセキュリティ制約が適用されている")
+            lines.append("")
+            lines.append("**矛盾の検出:**")
+            lines.append("8. 機能間の依存関係に循環がない")
+            lines.append("9. 権限設定に矛盾がない")
+            lines.append("10. データアクセスに競合がない")
+            lines.append("11. アクターのハードウェア制御が制約に違反していない")
+            lines.append("12. アクターのデータアクセスが制約に違反していない")
         else:
             detection = result["detection"]
             missing = detection["missing_items"]["summary"]
@@ -405,17 +529,41 @@ class AnalysisReporter:
                 lines.append(f"{priority}. **データアクセス競合の解消** - トランザクション制御や排他制御を追加")
                 priority += 1
 
+            if contradictions.get("actor_hardware_conflicts", 0) > 0:
+                lines.append(f"{priority}. **Actor→Hardware制約違反の解消** - ハードウェア制御の制約を満たすよう機能を修正")
+                priority += 1
+
+            if contradictions.get("actor_data_conflicts", 0) > 0:
+                lines.append(f"{priority}. **Actor→Data制約違反の解消** - データアクセスの制約を満たすよう機能を修正")
+                priority += 1
+
             # ヌケモレ
-            if missing["missing_security_requirements"] > 0:
-                lines.append(f"{priority}. **セキュリティ要件の追加** - 機密データの保護を明記")
+            if missing.get("missing_security_constraints", 0) > 0:
+                lines.append(f"{priority}. **セキュリティ制約の追加** - 機密データの保護を明記")
                 priority += 1
 
-            if missing["unused_functions"] > 0:
-                lines.append(f"{priority}. **未使用機能の確認** - 本当に必要か再検討")
+            if missing.get("isolated_functions", 0) > 0:
+                lines.append(f"{priority}. **孤立機能の確認** - アクターとの関係や依存関係を明確化")
                 priority += 1
 
-            if missing["orphan_data"] > 0:
+            if missing.get("unused_actors", 0) > 0:
+                lines.append(f"{priority}. **未使用アクターの確認** - 利用する機能を明確化")
+                priority += 1
+
+            if missing.get("unsatisfied_requirements", 0) > 0:
+                lines.append(f"{priority}. **未充足要件の確認** - 要件を満たす機能を追加")
+                priority += 1
+
+            if missing.get("orphan_data", 0) > 0:
                 lines.append(f"{priority}. **孤立データの確認** - どの機能で使用するか明確化")
+                priority += 1
+
+            if missing.get("orphan_hardware", 0) > 0:
+                lines.append(f"{priority}. **孤立ハードウェアの確認** - どの機能で制御するか明確化")
+                priority += 1
+
+            if missing.get("isolated_constraints", 0) > 0:
+                lines.append(f"{priority}. **孤立制約の確認** - どのノードに適用するか明確化")
                 priority += 1
 
         lines.append("")
@@ -450,12 +598,20 @@ class AnalysisReporter:
 
             if summary["missing_items_count"] > 0:
                 print("\n  【ヌケモレの内訳】")
-                if missing["unused_functions"] > 0:
-                    print(f"    - 利用されない機能: {missing['unused_functions']}件")
-                if missing["missing_security_requirements"] > 0:
-                    print(f"    - セキュリティ要件の漏れ: {missing['missing_security_requirements']}件")
-                if missing["orphan_data"] > 0:
+                if missing.get("isolated_functions", 0) > 0:
+                    print(f"    - 孤立した機能: {missing['isolated_functions']}件")
+                if missing.get("unused_actors", 0) > 0:
+                    print(f"    - 未使用のアクター: {missing['unused_actors']}件")
+                if missing.get("unsatisfied_requirements", 0) > 0:
+                    print(f"    - 未充足の要件: {missing['unsatisfied_requirements']}件")
+                if missing.get("orphan_data", 0) > 0:
                     print(f"    - 孤立データ: {missing['orphan_data']}件")
+                if missing.get("orphan_hardware", 0) > 0:
+                    print(f"    - 孤立ハードウェア: {missing['orphan_hardware']}件")
+                if missing.get("isolated_constraints", 0) > 0:
+                    print(f"    - 孤立した制約: {missing['isolated_constraints']}件")
+                if missing.get("missing_security_constraints", 0) > 0:
+                    print(f"    - セキュリティ制約の漏れ: {missing['missing_security_constraints']}件")
 
             if summary["contradictions_count"] > 0:
                 print("\n  【矛盾の内訳】")

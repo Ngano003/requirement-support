@@ -20,17 +20,21 @@ class SchemaMapper:
         "Actor": "システムを利用する人、役割、外部システム",
         "Function": "システムが提供する機能やユースケース",
         "Data": "管理されるデータやエンティティ",
-        "Requirement": "制約、ルール、非機能要件、セキュリティ要件",
+        "Requirement": "やるべきこと - システムが実現すべき機能や振る舞い",
+        "Constraint": "守るべきこと - 非機能要件、制約条件",
         "Hardware": "ハードウェア、デバイス、インフラストラクチャ",
     }
 
     STANDARD_RELATIONS = {
-        "USES": "ActorがFunctionを使用する",
-        "MANIPULATES": "FunctionがDataを操作する（Read/Write/Delete）",
-        "APPLIES_TO": "RequirementがData/Functionに適用される",
-        "DEPENDS_ON": "FunctionがFunctionに依存する",
-        "AUTHORIZES": "ActorがFunctionへのアクセス権限を持つ（Allow/Deny）",
-        "STORED_IN": "DataがStorage（DB、ファイルシステム）に保存される",
+        # ISレイヤー
+        "USES": "ActorがFunctionを使用する (ISレイヤー)",
+        "AUTHORIZES": "ActorがFunctionへのアクセス権限を持つ (ISレイヤー)",
+        "SATISFIES": "FunctionがRequirementを満たす (ISレイヤー)",
+        "MANIPULATES": "FunctionがDataを操作する（Read/Write/Delete）(ISレイヤー)",
+        "CONTROLS": "FunctionがHardwareを制御する (ISレイヤー)",
+        "DEPENDS_ON": "FunctionがFunctionに依存する (ISレイヤー)",
+        # SHOULDレイヤー
+        "APPLIES_TO": "Constraintがすべてのノードに適用される (SHOULDレイヤー)",
     }
 
     def __init__(self):
@@ -39,6 +43,7 @@ class SchemaMapper:
             "function_mapping": [],
             "data_mapping": [],
             "requirement_mapping": [],
+            "constraint_mapping": [],
             "hardware_mapping": [],
         }
 
@@ -90,17 +95,31 @@ class SchemaMapper:
                 }
             )
 
-        # Requirement候補をマッピング
+        # Requirement候補をマッピング（やるべきこと）
         for candidate in structure_candidates.get("requirement_candidates", []):
-            self.mapping["requirement_mapping"].append(
-                {
-                    "name": candidate["name"],
-                    "description": candidate.get("description", ""),
-                    "type": candidate.get("type", "Functional"),
-                    "label": "Requirement",
-                    "approved": True,
-                }
-            )
+            candidate_type = candidate.get("type", "Functional")
+            # Functional と BusinessRule のみを Requirement として扱う
+            if candidate_type in ["Functional", "BusinessRule"]:
+                self.mapping["requirement_mapping"].append(
+                    {
+                        "name": candidate["name"],
+                        "description": candidate.get("description", ""),
+                        "type": candidate_type,
+                        "label": "Requirement",
+                        "approved": True,
+                    }
+                )
+            else:
+                # その他は Constraint（守るべきこと）として分類
+                self.mapping["constraint_mapping"].append(
+                    {
+                        "name": candidate["name"],
+                        "description": candidate.get("description", ""),
+                        "category": self._map_type_to_category(candidate_type),
+                        "label": "Constraint",
+                        "approved": True,
+                    }
+                )
 
         # Hardware候補をマッピング
         for candidate in structure_candidates.get("hardware_candidates", []):
@@ -120,10 +139,39 @@ class SchemaMapper:
             f"  - Functions: {len(self.mapping['function_mapping'])}\n"
             f"  - Data: {len(self.mapping['data_mapping'])}\n"
             f"  - Requirements: {len(self.mapping['requirement_mapping'])}\n"
+            f"  - Constraints: {len(self.mapping['constraint_mapping'])}\n"
             f"  - Hardware: {len(self.mapping['hardware_mapping'])}"
         )
 
         return self.mapping
+
+    def _map_type_to_category(self, requirement_type: str) -> str:
+        """
+        旧Requirementのtypeを新Constraintのcategoryにマッピング
+
+        Args:
+            requirement_type: 旧Requirementのtype値
+
+        Returns:
+            Constraintのcategory値
+        """
+        type_to_category_map = {
+            "Performance": "Performance",
+            "Security": "Security",
+            "Availability": "Availability",
+            "Maintainability": "Maintainability",
+            "Usability": "Usability",
+            "Reliability": "Reliability",
+            "Capacity": "Capacity",
+            "Compatibility": "Compatibility",
+            "Timing": "Timing",
+            "Safety": "Safety",
+            "Environmental": "Environmental",
+            "Regulatory": "Regulatory",
+            "NonFunctional": "Performance",  # デフォルトマッピング
+            "Constraint": "Performance",  # デフォルトマッピング
+        }
+        return type_to_category_map.get(requirement_type, "Performance")
 
     def save_mapping(self, output_path: str):
         """
@@ -195,17 +243,30 @@ class SchemaMapper:
                     f"（機密性: {data.get('sensitivity', 'low')}）"
                 )
 
-        # Requirement抽出指示
+        # Requirement抽出指示（やるべきこと）
         approved_requirements = [
             item for item in self.mapping.get("requirement_mapping", []) if item.get("approved", True)
         ]
         if approved_requirements:
-            instructions.append("\n## Requirement（要件）")
+            instructions.append("\n## Requirement（やるべきこと）")
             instructions.append("以下の要件を抽出してください：")
             for req in approved_requirements:
                 instructions.append(
                     f"- **{req['name']}**: {req.get('description', '')} "
                     f"（タイプ: {req.get('type', 'Functional')}）"
+                )
+
+        # Constraint抽出指示（守るべきこと）
+        approved_constraints = [
+            item for item in self.mapping.get("constraint_mapping", []) if item.get("approved", True)
+        ]
+        if approved_constraints:
+            instructions.append("\n## Constraint（守るべきこと）")
+            instructions.append("以下の制約を抽出してください：")
+            for con in approved_constraints:
+                instructions.append(
+                    f"- **{con['name']}**: {con.get('description', '')} "
+                    f"（カテゴリー: {con.get('category', 'Performance')}）"
                 )
 
         # Hardware抽出指示
@@ -226,6 +287,20 @@ class SchemaMapper:
         instructions.append("以下の関係性を自動で推論してください：")
         for relation, description in self.STANDARD_RELATIONS.items():
             instructions.append(f"- **{relation}**: {description}")
+
+        instructions.append("\n## 関係性の原則（IS/SHOULDレイヤーモデル）")
+        instructions.append("\n### ISレイヤー（構造グラフ）:")
+        instructions.append("- Actor/Requirement は Function とのみ関係を持つ")
+        instructions.append("  - (Actor) -[:USES]-> (Function)")
+        instructions.append("  - (Function) -[:SATISFIES]-> (Requirement)")
+        instructions.append("- Data/Hardware は Function とのみ関係を持つ")
+        instructions.append("  - (Function) -[:MANIPULATES]-> (Data)")
+        instructions.append("  - (Function) -[:CONTROLS]-> (Hardware)")
+        instructions.append("- Function は Function と関係を持つ")
+        instructions.append("  - (Function) -[:DEPENDS_ON]-> (Function)")
+        instructions.append("\n### SHOULDレイヤー（制約グラフ）:")
+        instructions.append("- Constraint はすべてのノードと関係を持つ")
+        instructions.append("  - (Constraint) -[:APPLIES_TO]-> (Function/Data/Hardware/Actor/Requirement)")
 
         return "\n".join(instructions)
 
@@ -259,7 +334,7 @@ class SchemaMapper:
         if len(self.mapping.get("data_mapping", [])) > 5:
             print(f"  ... 他 {len(self.mapping.get('data_mapping', [])) - 5}件")
 
-        print(f"\n【Requirement】 {len(self.mapping.get('requirement_mapping', []))}件")
+        print(f"\n【Requirement（やるべきこと）】 {len(self.mapping.get('requirement_mapping', []))}件")
         for item in self.mapping.get("requirement_mapping", [])[:5]:
             status = "✅" if item.get("approved", True) else "❌"
             print(
@@ -268,6 +343,16 @@ class SchemaMapper:
             )
         if len(self.mapping.get("requirement_mapping", [])) > 5:
             print(f"  ... 他 {len(self.mapping.get('requirement_mapping', [])) - 5}件")
+
+        print(f"\n【Constraint（守るべきこと）】 {len(self.mapping.get('constraint_mapping', []))}件")
+        for item in self.mapping.get("constraint_mapping", [])[:5]:
+            status = "✅" if item.get("approved", True) else "❌"
+            print(
+                f"  {status} {item['name']}: {item.get('description', '')} "
+                f"[{item.get('category', 'Performance')}]"
+            )
+        if len(self.mapping.get("constraint_mapping", [])) > 5:
+            print(f"  ... 他 {len(self.mapping.get('constraint_mapping', [])) - 5}件")
 
         print(f"\n【Hardware】 {len(self.mapping.get('hardware_mapping', []))}件")
         for item in self.mapping.get("hardware_mapping", [])[:5]:

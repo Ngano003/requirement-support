@@ -347,19 +347,34 @@ class EntityExtractor:
                     f"（機密性: {data.get('sensitivity', 'low')}）\n"
                 )
 
-        # Requirement
+        # Requirement（やるべきこと）
         approved_requirements = [
             item
             for item in self.schema_mapping.get("requirement_mapping", [])
             if item.get("approved", True)
         ]
         if approved_requirements:
-            prompt_parts.append("\n### Requirement（要件）\n")
+            prompt_parts.append("\n### Requirement（やるべきこと）\n")
             prompt_parts.append("以下の要件を抽出してください：\n")
             for req in approved_requirements:
                 prompt_parts.append(
                     f"- **{req['name']}**: {req.get('description', '')} "
                     f"（タイプ: {req.get('type', 'Functional')}）\n"
+                )
+
+        # Constraint（守るべきこと）
+        approved_constraints = [
+            item
+            for item in self.schema_mapping.get("constraint_mapping", [])
+            if item.get("approved", True)
+        ]
+        if approved_constraints:
+            prompt_parts.append("\n### Constraint（守るべきこと）\n")
+            prompt_parts.append("以下の制約を抽出してください：\n")
+            for con in approved_constraints:
+                prompt_parts.append(
+                    f"- **{con['name']}**: {con.get('description', '')} "
+                    f"（カテゴリー: {con.get('category', 'Performance')}）\n"
                 )
 
         # Hardware
@@ -379,12 +394,17 @@ class EntityExtractor:
 
         # 関係性
         prompt_parts.append("\n### 関係性（Relations）\n")
-        prompt_parts.append("以下の関係性を推論してください：\n")
+        prompt_parts.append("以下の関係性を推論してください：\n\n")
+        prompt_parts.append("**ISレイヤー（構造グラフ）:**\n")
         prompt_parts.append("- **USES**: ActorがFunctionを使用する\n")
-        prompt_parts.append("- **MANIPULATES**: FunctionがDataを操作する（action: Read/Write/Delete）\n")
-        prompt_parts.append("- **APPLIES_TO**: RequirementがData/Functionに適用される\n")
-        prompt_parts.append("- **DEPENDS_ON**: FunctionがFunctionに依存する\n")
         prompt_parts.append("- **AUTHORIZES**: ActorがFunctionへのアクセス権限を持つ（permission: Allow/Deny）\n")
+        prompt_parts.append("- **SATISFIES**: FunctionがRequirementを満たす\n")
+        prompt_parts.append("- **MANIPULATES**: FunctionがDataを操作する（action: Read/Write/Delete）\n")
+        prompt_parts.append("- **CONTROLS**: FunctionがHardwareを制御する（control_type: Input/Output/InputOutput）\n")
+        prompt_parts.append("- **DEPENDS_ON**: FunctionがFunctionに依存する\n\n")
+        prompt_parts.append("**SHOULDレイヤー（制約グラフ）:**\n")
+        prompt_parts.append("- **APPLIES_TO**: Constraintがすべてのノード（Function/Data/Hardware/Actor/Requirement）に適用される\n\n")
+        prompt_parts.append("**重要:** Actor/RequirementはFunctionとのみ、Data/HardwareはFunctionとのみ関係を持ちます。\n")
 
         # 出力形式
         prompt_parts.append("\n## 出力形式\n")

@@ -175,9 +175,13 @@ class GraphRAGPoC:
         # ヌケモレのサマリー
         missing_items = detection_result["missing_items"]
         missing_summary = {
-            "unused_functions": len(missing_items["unused_functions"]),
-            "missing_security_requirements": len(missing_items["missing_security_requirements"]),
-            "orphan_data": len(missing_items["orphan_data"]),
+            "isolated_functions": len(missing_items.get("isolated_functions", [])),
+            "unused_actors": len(missing_items.get("unused_actors", [])),
+            "unsatisfied_requirements": len(missing_items.get("unsatisfied_requirements", [])),
+            "orphan_data": len(missing_items.get("orphan_data", [])),
+            "orphan_hardware": len(missing_items.get("orphan_hardware", [])),
+            "isolated_constraints": len(missing_items.get("isolated_constraints", [])),
+            "missing_security_constraints": len(missing_items.get("missing_security_constraints", [])),
         }
 
         # 矛盾のサマリー
