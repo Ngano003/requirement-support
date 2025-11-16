@@ -251,9 +251,9 @@ export default function ChatInterface({
                         {getCategoryLabel(message.question.category)}
                       </span>
                     </div>
-                    <p className="text-gray-800">{message.content}</p>
+                    <p className="text-gray-900 font-medium">{message.content}</p>
                     {message.question.context && (
-                      <p className="text-sm text-gray-500 mt-2">
+                      <p className="text-sm text-gray-700 mt-2">
                         背景: {message.question.context}
                       </p>
                     )}
@@ -282,7 +282,7 @@ export default function ChatInterface({
                 </div>
                 <div className="flex-1">
                   <div className="bg-green-50 border-l-4 border-green-500 rounded-lg p-4 shadow-sm">
-                    <p className="text-gray-800">{message.content}</p>
+                    <p className="text-gray-900 font-medium">{message.content}</p>
                   </div>
                 </div>
               </div>
@@ -298,7 +298,7 @@ export default function ChatInterface({
                     <div className="text-xs font-semibold text-orange-700 mb-2">
                       回答が不十分です。もう少し詳しく教えてください
                     </div>
-                    <p className="text-gray-800">{message.content}</p>
+                    <p className="text-gray-900 font-medium">{message.content}</p>
                   </div>
                 </div>
               </div>
@@ -314,8 +314,8 @@ export default function ChatInterface({
                     <div className="text-xs font-semibold text-purple-700 mb-2">
                       更新内容
                     </div>
-                    <div className="text-gray-800 prose prose-sm">
-                      <p className="whitespace-pre-wrap">{message.content}</p>
+                    <div className="prose prose-sm">
+                      <p className="whitespace-pre-wrap text-gray-900 font-medium">{message.content}</p>
                     </div>
                   </div>
                 </div>
@@ -364,7 +364,7 @@ export default function ChatInterface({
                 }
               }}
               placeholder="回答を入力してください..."
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
               disabled={isLoading || isUpdating}
             />
             <button
