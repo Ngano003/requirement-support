@@ -12,6 +12,7 @@ services:
       - ./backend:/app
       - ./data:/data
     environment:
+      # LLM Provider Settings
       - LLM_PROVIDER=${LLM_PROVIDER:-openrouter}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-qwen/qwen-2.5-coder-32b-instruct}
@@ -20,12 +21,18 @@ services:
       - VLLM_API_BASE=${VLLM_API_BASE:-http://localhost:8000/v1}
       - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-Coder-32B-Instruct}
       - VLLM_API_KEY=${VLLM_API_KEY:-}
+      # Application Settings
       - DATA_DIR=/data
       - MAX_TOKENS=${MAX_TOKENS:-4096}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_QUESTIONS=${MAX_QUESTIONS:-5}
-    networks:
-      - requirement-support-network
+      # Proxy Settings
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${HTTP_PROXY:-}
+      - https_proxy=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,requirement-support-frontend}
+      - no_proxy=${NO_PROXY:-localhost,127.0.0.1,requirement-support-frontend}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -38,6 +45,10 @@ services:
     build:
       context: ./frontend
       target: development
+      args:
+        - HTTP_PROXY=${HTTP_PROXY:-}
+        - HTTPS_PROXY=${HTTPS_PROXY:-}
+        - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1}
     container_name: requirement-support-frontend
     ports:
       - "3010:3000"
@@ -46,16 +57,19 @@ services:
       - /app/node_modules
       - /app/.next
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8010
-    networks:
-      - requirement-support-network
+      # API URL will be determined at runtime in browser
+      # Use relative path /api for production or set PUBLIC_BACKEND_URL for external access
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-}
+      # Proxy Settings
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - http_proxy=${HTTP_PROXY:-}
+      - https_proxy=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,requirement-support-backend}
+      - no_proxy=${NO_PROXY:-localhost,127.0.0.1,requirement-support-backend}
     depends_on:
       - backend
     restart: unless-stopped
-
-networks:
-  requirement-support-network:
-    driver: bridge
 
 volumes:
   data:

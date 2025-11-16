@@ -63,9 +63,24 @@ docker-compose down -v
 ```
 
 Services will be available at:
-- Frontend: http://localhost:3000
-- Backend: http://localhost:8001
-- API Docs: http://localhost:8001/docs
+- Frontend: http://localhost:3010 (or from remote: http://SERVER_IP:3010)
+- Backend: http://localhost:8010 (or from remote: http://SERVER_IP:8010)
+- API Docs: http://localhost:8010/docs
+
+**Remote Access Setup:**
+To access the UI from a different PC on the network:
+1. Find the server's IP address (e.g., `192.168.1.100`)
+2. Set `NEXT_PUBLIC_BACKEND_URL=http://192.168.1.100:8010` in `.env`
+3. Access the frontend at `http://192.168.1.100:3010`
+4. The browser will automatically connect to the backend at the configured URL
+
+**Proxy Configuration:**
+If you're behind a corporate proxy, configure these in `.env`:
+```bash
+HTTP_PROXY=http://proxy.example.com:8080
+HTTPS_PROXY=http://proxy.example.com:8080
+NO_PROXY=localhost,127.0.0.1,.local,.internal
+```
 
 ### Dev Container (VS Code)
 
@@ -117,7 +132,7 @@ npm install
 
 # Copy and configure environment
 cp .env.example .env.local
-# Edit .env.local (set NEXT_PUBLIC_API_URL=http://localhost:8001)
+# Edit .env.local if needed (optional: set NEXT_PUBLIC_BACKEND_URL for custom backend location)
 
 # Run development server (default port 3000)
 npm run dev
@@ -131,22 +146,33 @@ npm run lint
 
 ### Environment Configuration
 
-**Backend (.env)**:
+**Root-level .env (for docker-compose)**:
 ```env
-# Development with OpenRouter
+# LLM Provider
 LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=your-key
 OPENROUTER_MODEL=qwen/qwen-2.5-coder-32b-instruct
 
-# Production with vLLM
-LLM_PROVIDER=vllm
-VLLM_API_BASE=http://localhost:8000/v1
-VLLM_MODEL=Qwen/Qwen2.5-Coder-32B-Instruct
+# For remote access (optional)
+# NEXT_PUBLIC_BACKEND_URL=http://192.168.1.100:8010
+
+# For proxy environments (optional)
+# HTTP_PROXY=http://proxy.example.com:8080
+# HTTPS_PROXY=http://proxy.example.com:8080
+# NO_PROXY=localhost,127.0.0.1,.local,.internal
 ```
 
-**Frontend (.env.local)**:
+**Backend (.env)** (for manual development):
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8001
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-key
+OPENROUTER_MODEL=qwen/qwen-2.5-coder-32b-instruct
+```
+
+**Frontend (.env.local)** (for manual development):
+```env
+# Optional: Only set if backend is not on localhost:8010
+# NEXT_PUBLIC_BACKEND_URL=http://localhost:8001
 ```
 
 ## Code Architecture Details
@@ -226,7 +252,7 @@ When running with docker-compose:
 
 ### Networking
 
-All services run in a custom bridge network (`requirement-support-network`) allowing them to communicate using service names.
+Services use the default Docker bridge network for simplicity. Backend and frontend communicate via container names when both are in docker-compose, and via explicit URLs when accessed remotely.
 
 ## Testing Strategy
 
@@ -245,9 +271,11 @@ All services run in a custom bridge network (`requirement-support-network`) allo
 1. **Language**: All requirements documents and UI are in **Japanese**
 2. **LLM Model**: System is optimized for Qwen2.5-Coder (coding-focused model)
 3. **No Database**: Current implementation uses file-based storage
-4. **CORS**: Backend allows `localhost:3000` and `localhost:3001` origins
-5. **Port Allocation**: Backend on 8001, Frontend on 3000 (avoid conflicts)
+4. **CORS**: Backend allows all origins in development mode
+5. **Port Allocation**: Backend on 8010, Frontend on 3010 (docker-compose defaults)
 6. **Data Persistence**: The `data/` directory contains all generated requirements and sessions
+7. **Remote Access**: Frontend automatically detects backend URL based on browser hostname (port 8010)
+8. **Proxy Support**: Configure `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` in `.env` for corporate proxies
 
 ## Common Tasks
 

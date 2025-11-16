@@ -86,11 +86,36 @@ export interface ReviewResponse {
 
 // ========== API Client ==========
 
+/**
+ * Determine the API base URL at runtime for browser compatibility
+ * This supports:
+ * 1. Explicit backend URL from environment (NEXT_PUBLIC_BACKEND_URL)
+ * 2. Same-host access (when frontend and backend are on the same server)
+ * 3. Remote access (when accessing from different network)
+ */
+function getAPIBaseURL(): string {
+  // If NEXT_PUBLIC_BACKEND_URL is set, use it (for remote access scenarios)
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_BACKEND_URL;
+  }
+
+  // For browser environment, detect the current host and use port 8010
+  if (typeof window !== "undefined") {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    // Assume backend is on port 8010 (configurable via NEXT_PUBLIC_BACKEND_URL if different)
+    return `${protocol}//${hostname}:8010`;
+  }
+
+  // Fallback for SSR or build-time (should not be used in production)
+  return "http://localhost:8010";
+}
+
 class APIClient {
   private client: AxiosInstance;
 
   constructor() {
-    const baseURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+    const baseURL = getAPIBaseURL();
     this.client = axios.create({
       baseURL,
       headers: {
