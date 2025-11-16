@@ -13,10 +13,11 @@ app = FastAPI(
 )
 
 # CORS設定
+# プロキシ環境や異なるネットワークからのアクセスを許可するため、すべてのオリジンを許可
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:3010"],  # フロントエンドのURL
-    allow_credentials=True,
+    allow_origins=["*"],  # すべてのオリジンを許可（開発・テスト環境用）
+    allow_credentials=False,  # allow_origins=["*"]の場合はFalseにする必要がある
     allow_methods=["*"],
     allow_headers=["*"],
 )
