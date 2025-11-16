@@ -65,7 +65,29 @@ ENTITY_EXTRACTION_PROMPT_TEMPLATE = """
 - **Allow**: 許可
 - **Deny**: 禁止
 
-【抽出例】
+【抽出ルール: Constraint（制約条件）について】
+
+**Constraint（守るべきこと）は、必ず独立したエンティティとして抽出してください。**
+
+Constraintの特徴:
+- 「〜しなければならない」「〜すること」「〜以内」「〜以上」などの表現
+- 機能やハードウェア、データに課せられる制約
+- 必須プロパティ: `name`, `category`
+- `category`の値は以下のいずれか:
+  - **Performance**: 性能（応答時間、スループットなど）
+  - **Timing**: タイミング（周期、実行タイミングなど）
+  - **Safety**: 安全性（ASIL、ISO26262など）
+  - **Security**: セキュリティ（暗号化、認証など）
+  - **Availability**: 可用性（稼働率など）
+  - **Reliability**: 信頼性（MTBF、故障率など）
+  - **Maintainability**: 保守性（修正時間など）
+  - **Usability**: ユーザビリティ（操作時間など）
+  - **Capacity**: 容量（メモリ、ストレージなど）
+  - **Compatibility**: 互換性（プロトコル、規格など）
+  - **Environmental**: 環境（温度、湿度など）
+  - **Regulatory**: 規制（法規制、標準規格など）
+
+【抽出例1: 基本的な機能とデータ】
 
 入力テキスト:
 ```
@@ -77,9 +99,6 @@ ENTITY_EXTRACTION_PROMPT_TEMPLATE = """
 ### ログイン機能
 ユーザーはメールアドレスとパスワードでログインできる。
 ユーザー情報を参照してログイン認証を行う。
-
-### 非機能要件
-個人情報（ユーザー情報）は暗号化して保存すること。
 ```
 
 出力:
@@ -133,11 +152,10 @@ ENTITY_EXTRACTION_PROMPT_TEMPLATE = """
       }}
     }},
     {{
-      "type": "Requirement",
-      "id": "REQ-001",
+      "type": "Data",
+      "id": "DATA-002",
       "properties": {{
-        "name": "個人情報は暗号化して保存すること",
-        "type": "Security"
+        "name": "書籍情報"
       }}
     }}
   ],
@@ -193,28 +211,239 @@ ENTITY_EXTRACTION_PROMPT_TEMPLATE = """
       }}
     }},
     {{
-      "type": "APPLIES_TO",
-      "source_id": "REQ-001",
+      "type": "MANIPULATES",
+      "source_id": "FUNC-002",
+      "target_id": "DATA-002",
+      "properties": {{
+        "action": "Read"
+      }}
+    }}
+  ]
+}}
+```
+
+【抽出例2: 制約条件（Constraint）の抽出】
+
+入力テキスト:
+```
+## 機能要件
+### 暗証番号解錠機能
+ユーザーがキーパッドで暗証番号を入力し、認証に成功すればドアロックモーターを作動させて解錠する。
+
+## 非機能要件
+### 性能要件
+- 暗証番号入力後、解錠完了までの応答時間は3秒以内であること
+- システムは同時に最大100件の解錠リクエストを処理できること
+
+### セキュリティ要件
+- 認証キーDBは暗号化して保存すること
+- 連続3回認証失敗時は、5分間ロックアウトすること
+
+### 安全性要件
+- ドアロックモーターの制御はISO26262に準拠すること
+- 停電時も手動解錠が可能であること
+
+### 環境要件
+- 動作温度範囲は-10℃〜50℃であること
+```
+
+出力:
+```json
+{{
+  "entities": [
+    {{
+      "type": "Function",
+      "id": "FUNC-001",
+      "properties": {{
+        "name": "暗証番号解錠機能",
+        "description": "ユーザーがキーパッドで暗証番号を入力し、認証に成功すればドアロックモーターを作動させて解錠する"
+      }}
+    }},
+    {{
+      "type": "Hardware",
+      "id": "HW-001",
+      "properties": {{
+        "name": "キーパッド",
+        "device_type": "Input"
+      }}
+    }},
+    {{
+      "type": "Hardware",
+      "id": "HW-002",
+      "properties": {{
+        "name": "ドアロックモーター",
+        "device_type": "Actuator"
+      }}
+    }},
+    {{
+      "type": "Data",
+      "id": "DATA-001",
+      "properties": {{
+        "name": "認証キーDB",
+        "sensitivity": "confidential"
+      }}
+    }},
+    {{
+      "type": "Constraint",
+      "id": "CONST-001",
+      "properties": {{
+        "name": "解錠応答時間制約",
+        "description": "暗証番号入力後、解錠完了までの応答時間は3秒以内",
+        "category": "Performance",
+        "value": "3秒以内"
+      }}
+    }},
+    {{
+      "type": "Constraint",
+      "id": "CONST-002",
+      "properties": {{
+        "name": "同時処理数制約",
+        "description": "同時に最大100件の解錠リクエストを処理",
+        "category": "Performance",
+        "value": "最大100件"
+      }}
+    }},
+    {{
+      "type": "Constraint",
+      "id": "CONST-003",
+      "properties": {{
+        "name": "認証キーDB暗号化",
+        "description": "認証キーDBは暗号化して保存",
+        "category": "Security"
+      }}
+    }},
+    {{
+      "type": "Constraint",
+      "id": "CONST-004",
+      "properties": {{
+        "name": "ロックアウト制約",
+        "description": "連続3回認証失敗時は5分間ロックアウト",
+        "category": "Security",
+        "value": "3回失敗で5分間"
+      }}
+    }},
+    {{
+      "type": "Constraint",
+      "id": "CONST-005",
+      "properties": {{
+        "name": "ISO26262準拠",
+        "description": "ドアロックモーターの制御はISO26262に準拠",
+        "category": "Safety"
+      }}
+    }},
+    {{
+      "type": "Constraint",
+      "id": "CONST-006",
+      "properties": {{
+        "name": "停電時手動解錠",
+        "description": "停電時も手動解錠が可能",
+        "category": "Safety"
+      }}
+    }},
+    {{
+      "type": "Constraint",
+      "id": "CONST-007",
+      "properties": {{
+        "name": "動作温度範囲",
+        "description": "動作温度範囲は-10℃〜50℃",
+        "category": "Environmental",
+        "value": "-10℃〜50℃"
+      }}
+    }}
+  ],
+  "relations": [
+    {{
+      "type": "CONTROLS",
+      "source_id": "FUNC-001",
+      "target_id": "HW-001",
+      "properties": {{
+        "control_type": "Input"
+      }}
+    }},
+    {{
+      "type": "CONTROLS",
+      "source_id": "FUNC-001",
+      "target_id": "HW-002",
+      "properties": {{
+        "control_type": "Output"
+      }}
+    }},
+    {{
+      "type": "MANIPULATES",
+      "source_id": "FUNC-001",
       "target_id": "DATA-001",
+      "properties": {{
+        "action": "Read"
+      }}
+    }},
+    {{
+      "type": "APPLIES_TO",
+      "source_id": "CONST-001",
+      "target_id": "FUNC-001",
+      "properties": {{}}
+    }},
+    {{
+      "type": "APPLIES_TO",
+      "source_id": "CONST-002",
+      "target_id": "FUNC-001",
+      "properties": {{}}
+    }},
+    {{
+      "type": "APPLIES_TO",
+      "source_id": "CONST-003",
+      "target_id": "DATA-001",
+      "properties": {{}}
+    }},
+    {{
+      "type": "APPLIES_TO",
+      "source_id": "CONST-004",
+      "target_id": "FUNC-001",
+      "properties": {{}}
+    }},
+    {{
+      "type": "APPLIES_TO",
+      "source_id": "CONST-005",
+      "target_id": "HW-002",
+      "properties": {{}}
+    }},
+    {{
+      "type": "APPLIES_TO",
+      "source_id": "CONST-006",
+      "target_id": "HW-002",
+      "properties": {{}}
+    }},
+    {{
+      "type": "APPLIES_TO",
+      "source_id": "CONST-007",
+      "target_id": "HW-002",
       "properties": {{}}
     }}
   ]
 }}
 ```
 
+**重要なポイント:**
+- Constraintは独立したエンティティとして抽出
+- 各Constraintには適切な`category`を設定（Performance, Security, Safety, Environmentalなど）
+- `value`プロパティに具体的な数値や条件を記載（オプション）
+- APPLIES_TOリレーションで適用対象（Function/Data/Hardware）を明確化
+
 【出力形式】
 上記の例と同じJSON形式で出力してください。
 - `entities`: エンティティの配列
-  - `type`: エンティティタイプ（Actor, Function, Data, Requirement のいずれか）
-  - `id`: 一意のID（例: ACTOR-001, FUNC-001）
+  - `type`: エンティティタイプ（Actor, Function, Data, Requirement, Constraint, Hardware のいずれか）
+  - `id`: 一意のID（例: ACTOR-001, FUNC-001, CONST-001）
   - `properties`: プロパティ（必須プロパティを必ず含める）
+    - **Constraintの場合**: `name`, `category`（必須）, `description`, `value`（オプション）
 - `relations`: リレーションシップの配列
-  - `type`: リレーションタイプ（USES, MANIPULATES, DEPENDS_ON, APPLIES_TO, AUTHORIZES のいずれか）
+  - `type`: リレーションタイプ（USES, MANIPULATES, DEPENDS_ON, APPLIES_TO, AUTHORIZES, CONTROLS のいずれか）
   - `source_id`: ソースエンティティのID
   - `target_id`: ターゲットエンティティのID
-  - `properties`: プロパティ（リレーションタイプに応じて action や permission を設定）
+  - `properties`: プロパティ（リレーションタイプに応じて action, permission, control_type を設定）
 
-**重要**: JSON形式のみを出力してください。説明文は不要です。
+**重要**:
+- JSON形式のみを出力してください。説明文は不要です。
+- 制約条件（Constraint）は漏れなく抽出してください。特に「〜しなければならない」「〜以内」「〜すること」などの表現に注意。
 """
 
 

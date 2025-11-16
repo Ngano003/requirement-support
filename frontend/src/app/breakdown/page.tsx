@@ -284,7 +284,7 @@ export default function BreakdownPage() {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="例:&#10;&#10;【プロジェクト概要】&#10;社内の業務管理システムを新規開発する。&#10;&#10;【主な機能】&#10;- ユーザー管理&#10;- タスク管理&#10;- レポート出力&#10;&#10;【制約】&#10;- 予算: 500万円&#10;- 納期: 6ヶ月後"
-                className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full h-96 p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500"
               />
 
               <div className="mt-6 flex justify-end">

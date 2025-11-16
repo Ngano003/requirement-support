@@ -35,6 +35,7 @@ else:
 from app.schemas.knowledge_graph_schema import (
     ENTITY_TYPES,
     RELATION_TYPES,
+    ConstraintCategoryEnum,
 )
 from app.prompts.entity_extraction_prompt import (
     ENTITY_EXTRACTION_SYSTEM_PROMPT,
@@ -86,32 +87,17 @@ class EntityExtractor:
 
     def _split_markdown_by_section(self, text: str) -> List[str]:
         """
-        MarkdownテキストをH2 (##) ヘッダーでセクション分割する。
-        H1やヘッダーのない部分も最初のチャンクとして保持する。
+        全文を1チャンクとして返す（ファイル単位での処理）
+
+        Note: 以前はH2セクションで分割していましたが、
+        文脈を保持するため1ファイル=1チャンクに変更しました。
         """
         if not text:
             return []
-        
-        # H2ヘッダー (##) で分割。ヘッダー自体もチャンクに含める
-        sections = text.split("\n## ")
-        
-        processed_sections = []
-        if sections:
-            # 最初のセクション（H2より前、またはH2がない場合）
-            if not text.startswith("## ") and sections[0]:
-                processed_sections.append(sections[0])
-            elif text.startswith("## ") and sections[0]:
-                 processed_sections.append(f"## {sections[0]}") # 最初のH2を復元
 
-            # 2番目以降のセクションに "## " を戻す
-            if len(sections) > 1:
-                processed_sections.extend([f"## {s}" for s in sections[1:] if s])
-        
-        if not processed_sections and text:
-             processed_sections = [text] # 分割できなかった場合は全文を1チャンクとする
-            
-        logger.info(f"Document split into {len(processed_sections)} chunks.")
-        return processed_sections
+        # 全文を1チャンクとして返す
+        logger.info(f"Processing document as 1 chunk (full file)")
+        return [text]
 
     def _aggregate_results(self, results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -208,33 +194,44 @@ class EntityExtractor:
     async def _extract_chunk(self, chunk_text: str) -> Dict[str, Any]:
         """
         単一のテキストチャンクからエンティティとリレーションを抽出
-        （元のextractメソッドのロジックを移植）
+        （2パス抽出: 1パス目で通常のエンティティ、2パス目で制約条件）
         """
         try:
-            # プロンプト構築（スキーママッピングがあれば使用）
+            # --- 1パス目: 通常のエンティティ抽出 ---
             if self.schema_mapping:
-                # logger.info("Using schema mapping for guided extraction...")
                 prompt = self._build_guided_extraction_prompt(chunk_text)
                 system_prompt = "あなたは要件定義書のエンティティ抽出の専門家です。与えられたスキーマ定義に従って、正確にエンティティと関係性を抽出してください。"
             else:
                 prompt = build_entity_extraction_prompt(chunk_text)
                 system_prompt = ENTITY_EXTRACTION_SYSTEM_PROMPT
 
-            # LLMで抽出
-            # logger.info("Extracting entities and relations from requirements text...")
             response = await self._call_llm(
                 system_prompt=system_prompt,
                 user_prompt=prompt,
-                temperature=0.0  # 安定性を確保するために0.0固定
+                temperature=0.0
             )
 
-            # JSONパース
             data = self._parse_json(response)
-
-            # バリデーション
             validated = self._validate_and_clean(data)
 
-            # チャンクごとのログはデバッグレベルに（多すぎるため）
+            # --- 2パス目: 制約条件の追加抽出 ---
+            # 非機能要件や制約条件のキーワードがあれば、専用パスを実行
+            if self._should_extract_constraints(chunk_text):
+                constraint_data = await self._extract_constraints_only(chunk_text)
+
+                # 既存のエンティティIDのセット
+                existing_ids = {e["id"] for e in validated["entities"]}
+
+                # 重複を避けて制約を追加
+                for constraint in constraint_data.get("entities", []):
+                    if constraint["id"] not in existing_ids:
+                        validated["entities"].append(constraint)
+                        existing_ids.add(constraint["id"])
+
+                # リレーションも追加
+                validated["relations"].extend(constraint_data.get("relations", []))
+                validated["validation_errors"].extend(constraint_data.get("validation_errors", []))
+
             logger.debug(
                 f"Chunk extracted {len(validated['entities'])} entities, "
                 f"{len(validated['relations'])} relations, "
@@ -245,12 +242,113 @@ class EntityExtractor:
 
         except Exception as e:
             logger.error(f"Entity extraction failed for chunk: {e}", exc_info=True)
-            # チャンクレベルのエラーは、集約フェーズで処理するためにリストで返す
             return {
                 "entities": [],
                 "relations": [],
                 "validation_errors": [f"Chunk processing error: {e}"],
             }
+
+    def _should_extract_constraints(self, text: str) -> bool:
+        """
+        テキストに制約条件がありそうかを判定
+        """
+        constraint_keywords = [
+            "非機能要件", "制約", "しなければならない", "すること",
+            "以内", "以上", "以下", "性能", "セキュリティ", "安全性",
+            "可用性", "信頼性", "保守性", "準拠", "規格", "標準"
+        ]
+        return any(keyword in text for keyword in constraint_keywords)
+
+    async def _extract_constraints_only(self, chunk_text: str) -> Dict[str, Any]:
+        """
+        制約条件のみを抽出する専用メソッド（2パス目用）
+        """
+        try:
+            constraint_prompt = self._build_constraint_extraction_prompt(chunk_text)
+            system_prompt = "あなたは要件定義書から制約条件（非機能要件）を抽出する専門家です。性能、セキュリティ、安全性などの制約を漏れなく抽出してください。"
+
+            response = await self._call_llm(
+                system_prompt=system_prompt,
+                user_prompt=constraint_prompt,
+                temperature=0.0
+            )
+
+            data = self._parse_json(response)
+            validated = self._validate_and_clean(data)
+
+            logger.debug(f"Constraint-only pass: extracted {len(validated['entities'])} constraints")
+
+            return validated
+
+        except Exception as e:
+            logger.warning(f"Constraint extraction failed: {e}")
+            return {
+                "entities": [],
+                "relations": [],
+                "validation_errors": [f"Constraint extraction error: {e}"],
+            }
+
+    def _build_constraint_extraction_prompt(self, requirements_text: str) -> str:
+        """
+        制約条件抽出専用のプロンプトを生成
+        """
+        prompt_parts = []
+
+        prompt_parts.append("以下の要件定義書から、**制約条件（Constraint）のみ**を抽出してください。\n\n")
+
+        prompt_parts.append("## 制約条件とは\n")
+        prompt_parts.append("システムが「守るべきこと」を記述したもの。以下のような表現で記述されています：\n")
+        prompt_parts.append("- 「〜しなければならない」「〜すること」\n")
+        prompt_parts.append("- 「〜以内」「〜以上」「〜以下」（数値制約）\n")
+        prompt_parts.append("- 「準拠」「規格」「標準」（規制・標準への適合）\n")
+        prompt_parts.append("- 性能、セキュリティ、安全性、可用性、信頼性などの非機能要件\n\n")
+
+        prompt_parts.append("## 抽出すべき制約のカテゴリー\n")
+        prompt_parts.append("各制約には、以下のいずれかのcategoryを設定してください：\n")
+        prompt_parts.append("- **Performance**: 性能（応答時間、スループット、処理速度など）\n")
+        prompt_parts.append("- **Timing**: タイミング（周期、実行タイミングなど）\n")
+        prompt_parts.append("- **Safety**: 安全性（ASIL、ISO26262、機能安全など）\n")
+        prompt_parts.append("- **Security**: セキュリティ（暗号化、認証、アクセス制御など）\n")
+        prompt_parts.append("- **Availability**: 可用性（稼働率、ダウンタイムなど）\n")
+        prompt_parts.append("- **Reliability**: 信頼性（MTBF、故障率など）\n")
+        prompt_parts.append("- **Maintainability**: 保守性（修正時間、ログ出力など）\n")
+        prompt_parts.append("- **Usability**: ユーザビリティ（操作時間、学習時間など）\n")
+        prompt_parts.append("- **Capacity**: 容量（メモリ、ストレージ、同時接続数など）\n")
+        prompt_parts.append("- **Compatibility**: 互換性（プロトコル、規格、バージョンなど）\n")
+        prompt_parts.append("- **Environmental**: 環境（動作温度、湿度、振動など）\n")
+        prompt_parts.append("- **Regulatory**: 規制（法規制、業界標準など）\n\n")
+
+        prompt_parts.append("## 要件定義書\n\n")
+        prompt_parts.append(requirements_text)
+        prompt_parts.append("\n\n## 出力形式\n")
+        prompt_parts.append("以下のJSON形式で、制約条件のみを出力してください：\n\n")
+        prompt_parts.append('```json\n')
+        prompt_parts.append('{\n')
+        prompt_parts.append('  "entities": [\n')
+        prompt_parts.append('    {\n')
+        prompt_parts.append('      "type": "Constraint",\n')
+        prompt_parts.append('      "id": "CONST-001",\n')
+        prompt_parts.append('      "properties": {\n')
+        prompt_parts.append('        "name": "制約の名前",\n')
+        prompt_parts.append('        "description": "制約の詳細説明",\n')
+        prompt_parts.append('        "category": "Performance",\n')
+        prompt_parts.append('        "value": "3秒以内"  // オプション：具体的な数値や条件\n')
+        prompt_parts.append('      }\n')
+        prompt_parts.append('    }\n')
+        prompt_parts.append('  ],\n')
+        prompt_parts.append('  "relations": [\n')
+        prompt_parts.append('    {\n')
+        prompt_parts.append('      "type": "APPLIES_TO",\n')
+        prompt_parts.append('      "source_id": "CONST-001",\n')
+        prompt_parts.append('      "target_id": "適用対象のエンティティID",\n')
+        prompt_parts.append('      "properties": {}\n')
+        prompt_parts.append('    }\n')
+        prompt_parts.append('  ]\n')
+        prompt_parts.append('}\n')
+        prompt_parts.append('```\n\n')
+        prompt_parts.append("**重要**: 制約条件（Constraint）のみを抽出してください。Actor, Function, Data, Hardwareは出力しないでください。\n")
+
+        return "".join(prompt_parts)
 
     async def _call_llm(self, system_prompt: str, user_prompt: str, temperature=None) -> str:
         """LLM APIを呼び出し"""
@@ -387,6 +485,22 @@ class EntityExtractor:
         for required_prop in entity_type_def.required_properties:
             if required_prop not in properties:
                 return False, f"Missing required property: {required_prop}"
+
+        # Constraint専用のバリデーション
+        if entity_type == "Constraint":
+            category = properties.get("category")
+            if not category:
+                return False, "Constraint must have 'category' property"
+
+            # カテゴリーの値が有効かチェック
+            valid_categories = {
+                "Performance", "Timing", "Safety", "Security",
+                "Availability", "Reliability", "Maintainability",
+                "Usability", "Capacity", "Compatibility",
+                "Environmental", "Regulatory"
+            }
+            if category not in valid_categories:
+                return False, f"Invalid constraint category: {category}. Must be one of {valid_categories}"
 
         return True, ""
 
