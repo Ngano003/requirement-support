@@ -26,8 +26,10 @@ class LLMService:
             self.client = None
         else:
             # OpenRouterまたはvLLMの場合
+            # API Key我からの場合はNoneを設定
+            api_key = settings.api_key if settings.api_key else None
             self.client = AsyncOpenAI(
-                api_key=settings.api_key,
+                api_key=api_key or "dummy-key",
                 base_url=settings.base_url,
             )
             self.google_client = None
